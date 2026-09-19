@@ -677,6 +677,7 @@ await test("seed.sql se aplica (y es idempotente): perfiles demo, ofertas, búsq
   assert.ok(avatares.every((a) => a.avatar_url && /^https:\/\/i\.pravatar\.cc\/400\?img=\d+$/.test(a.avatar_url)), "hay perfiles demo sin avatar");
   assert.equal(new Set(avatares.map((a) => a.avatar_url)).size, avatares.length, "avatares repetidos");
   assert.equal(avatares.length, 23);
+  await esperado("perfiles demo con onboarding completo (salen en /explorar)", "select count(*)::int n from public.profiles where id::text like '00000000-0000-4000-8000-%' and onboarding_completed", 23);
 });
 
 // ── 7b. Fotos de perfil (máx. 10), onboarding y simulación de personas ──────

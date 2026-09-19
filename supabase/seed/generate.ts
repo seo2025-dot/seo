@@ -51,7 +51,7 @@ for (const u of USUARIOS) {
   w(`  identity_verified = ${u.verificaciones.identidad}, phone_verified = ${u.verificaciones.telefono}, email_verified = ${u.verificaciones.email},`);
   w(`  kyc_status = ${lit(u.verificaciones.identidad ? "verified" : "none")}, rating = ${u.rating}, reviews_count = ${u.resenas}, response_rate = ${u.respuesta},`);
   const avatar = avatarDemo(u.id);
-  w(`  ${avatar ? `avatar_url = ${lit(avatar)}, ` : ""}is_demo = true, created_at = make_timestamptz(${u.miembroDesde}, 3, 1, 0, 0, 0)`);
+  w(`  ${avatar ? `avatar_url = ${lit(avatar)}, ` : ""}is_demo = true, onboarding_completed = true, created_at = make_timestamptz(${u.miembroDesde}, 3, 1, 0, 0, 0)`);
   w(`where id = '${uid(u.id)}';`);
 }
 w();

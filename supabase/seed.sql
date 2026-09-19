@@ -78,161 +78,161 @@ update public.profiles set display_name = 'Lucía Ferrer', handle = '@lucia.ferr
   age = 38, sign = 'leo', professional = null, badges = array['superhost', 'respuesta-rapida', 'fundador']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 48, response_rate = 98,
-  avatar_url = 'https://i.pravatar.cc/400?img=45', is_demo = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=45', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000001';
 update public.profiles set display_name = 'Martín Sosa', handle = '@martin.sosa', bio = 'Alquileres céntricos, trato directo y sin sorpresas.', location = 'Centro',
   interests = array['anfitrion']::text[], zones = array['Centro']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 41, sign = 'virgo', professional = null, badges = array['respuesta-rapida']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.7, reviews_count = 31, response_rate = 94,
-  avatar_url = 'https://i.pravatar.cc/400?img=13', is_demo = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=13', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000002';
 update public.profiles set display_name = 'Carolina Vidal', handle = '@caro.vidal', bio = 'Terrenos y proyectos. Si buscas dónde construir, hablemos.', location = 'Zona Sur',
   interests = array['anfitrion', 'inversor']::text[], zones = array['Zona Sur', 'Valle Alto']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 36, sign = 'capricornio', professional = null, badges = array['inversor-pro']::text[],
   identity_verified = true, phone_verified = true, email_verified = false,
   kyc_status = 'verified', rating = 4.6, reviews_count = 12, response_rate = 88,
-  avatar_url = 'https://i.pravatar.cc/400?img=32', is_demo = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=32', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000003';
 update public.profiles set display_name = 'Andrés Molina', handle = '@andres.molina', bio = 'Propiedades premium, autos de colección y oportunidades de inversión.', location = 'Las Lomas',
   interests = array['anfitrion', 'inversor']::text[], zones = array['Las Lomas', 'Country Los Pinos']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 44, sign = 'escorpio', professional = null, badges = array['superhost', 'inversor-pro']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.8, reviews_count = 57, response_rate = 96,
-  avatar_url = 'https://i.pravatar.cc/400?img=8', is_demo = true, created_at = make_timestamptz(2020, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=8', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2020, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000004';
 update public.profiles set display_name = 'Valeria Núñez', handle = '@vale.nunez', bio = 'Lofts y espacios con carácter en el casco histórico.', location = 'Barrio Histórico',
   interests = array['anfitrion']::text[], zones = array['Barrio Histórico', 'Centro']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 33, sign = 'piscis', professional = null, badges = array['respuesta-rapida', 'vecino-activo']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 22, response_rate = 99,
-  avatar_url = 'https://i.pravatar.cc/400?img=36', is_demo = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=36', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000005';
 update public.profiles set display_name = 'Diego Paredes', handle = '@diego.paredes', bio = 'Departamentos con vista, motos y buena rentabilidad.', location = 'Puerto Nuevo',
   interests = array['anfitrion', 'inversor']::text[], zones = array['Puerto Nuevo']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 39, sign = 'tauro', professional = null, badges = array['inversor-pro']::text[],
   identity_verified = true, phone_verified = false, email_verified = true,
   kyc_status = 'verified', rating = 4.5, reviews_count = 17, response_rate = 85,
-  avatar_url = 'https://i.pravatar.cc/400?img=12', is_demo = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=12', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000006';
 update public.profiles set display_name = 'Sofía Aguirre', handle = '@sofi.aguirre', bio = 'Casas familiares en barrios cerrados. Mudanzas sin estrés.', location = 'Country Los Pinos',
   interests = array['anfitrion']::text[], zones = array['Country Los Pinos']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 35, sign = 'cancer', professional = null, badges = array['superhost']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.8, reviews_count = 39, response_rate = 97,
-  avatar_url = 'https://i.pravatar.cc/400?img=5', is_demo = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=5', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000007';
 update public.profiles set display_name = 'Ricardo Beltrán', handle = '@ricardo.beltran', bio = 'Residencias señoriales, transporte y patrimonio familiar.', location = 'Valle Alto',
   interests = array['anfitrion', 'inversor']::text[], zones = array['Valle Alto', 'Las Lomas']::text[], relations = array[]::text[], lifestyle = array[]::text[], budget = null,
   age = 52, sign = 'sagitario', professional = null, badges = array['inversor-pro', 'fundador']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.7, reviews_count = 26, response_rate = 90,
-  avatar_url = 'https://i.pravatar.cc/400?img=18', is_demo = true, created_at = make_timestamptz(2020, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=18', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2020, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000008';
 update public.profiles set display_name = 'Camila Rojas', handle = '@cami.rojas', bio = 'Diseñadora gráfica. Busco roomie tranquila, con buena onda y plantas 🌿.', location = 'Centro',
   interests = array['roomie', 'inquilino', 'amigos']::text[], zones = array['Centro', 'Barrio Histórico']::text[], relations = array['amistad', 'roomie']::text[], lifestyle = array['Creativa', 'Amante de las plantas', 'Foodie']::text[], budget = 'USD 400–600 / mes',
   age = 29, sign = 'geminis', professional = null, badges = array['roomie-ideal', 'vecino-activo']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 8, response_rate = 95,
-  avatar_url = 'https://i.pravatar.cc/400?img=26', is_demo = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=26', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000009';
 update public.profiles set display_name = 'Javier Ortega', handle = '@javi.ortega', bio = 'Primera vivienda en camino. Comparto lo que voy aprendiendo del proceso.', location = 'Zona Norte',
   interests = array['comprador', 'inversor']::text[], zones = array['Zona Norte', 'Puerto Nuevo']::text[], relations = array['pareja', 'socios']::text[], lifestyle = array['Deportista', 'Emprendedor', 'Viajero']::text[], budget = 'USD 150–250 mil',
   age = 32, sign = 'aries', professional = null, badges = array['explorador']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.6, reviews_count = 4, response_rate = 90,
-  avatar_url = 'https://i.pravatar.cc/400?img=52', is_demo = true, created_at = make_timestamptz(2025, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=52', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2025, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000010';
 update public.profiles set display_name = 'Paula Herrera', handle = '@pau.herrera', bio = 'Nueva en la ciudad. Busco gente para compartir depto y salir a descubrir barrios.', location = 'Puerto Nuevo',
   interests = array['amigos', 'roomie']::text[], zones = array['Centro', 'Puerto Nuevo']::text[], relations = array['amistad', 'pareja', 'roomie']::text[], lifestyle = array['Nocturna', 'Viajera', 'Mascotas']::text[], budget = 'USD 350–500 / mes',
   age = 27, sign = 'libra', professional = null, badges = array['explorador', 'respuesta-rapida']::text[],
   identity_verified = false, phone_verified = true, email_verified = true,
   kyc_status = 'none', rating = 4.8, reviews_count = 5, response_rate = 97,
-  avatar_url = 'https://i.pravatar.cc/400?img=27', is_demo = true, created_at = make_timestamptz(2025, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=27', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2025, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000011';
 update public.profiles set display_name = 'Tomás Iglesias', handle = '@tomas.iglesias', bio = 'Inversor en propiedades para renta. Busco socios para proyectos pequeños.', location = 'Zona Sur',
   interests = array['inversor']::text[], zones = array['Zona Sur', 'Valle Alto']::text[], relations = array['socios']::text[], lifestyle = array['Emprendedor', 'Lector', 'Casero']::text[], budget = 'USD 80–300 mil',
   age = 40, sign = 'tauro', professional = null, badges = array['inversor-pro']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.7, reviews_count = 14, response_rate = 86,
-  avatar_url = 'https://i.pravatar.cc/400?img=60', is_demo = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=60', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000012';
 update public.profiles set display_name = 'Nadia Campos', handle = '@nadia.campos', bio = 'Familia de cuatro buscando casa con jardín. Fan de los barrios cerrados.', location = 'Las Lomas',
   interests = array['comprador', 'amigos']::text[], zones = array['Las Lomas', 'Country Los Pinos']::text[], relations = array['amistad']::text[], lifestyle = array['Familiar', 'Mascotas', 'Casera']::text[], budget = 'USD 300–450 mil',
   age = 37, sign = 'acuario', professional = null, badges = array['vecino-activo']::text[],
   identity_verified = true, phone_verified = true, email_verified = false,
   kyc_status = 'verified', rating = 4.5, reviews_count = 3, response_rate = 92,
-  avatar_url = 'https://i.pravatar.cc/400?img=16', is_demo = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=16', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000013';
 update public.profiles set display_name = 'Bruno Salvatierra', handle = '@bruno.salva', bio = 'Desarrollador remoto. Roomie ordenado, cocino los domingos.', location = 'Centro',
   interests = array['roomie', 'inquilino']::text[], zones = array['Centro', 'Zona Norte']::text[], relations = array['roomie', 'amistad']::text[], lifestyle = array['Casero', 'Foodie', 'Gamer']::text[], budget = 'USD 450–700 / mes',
   age = 31, sign = 'virgo', professional = null, badges = array['roomie-ideal']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 11, response_rate = 93,
-  avatar_url = 'https://i.pravatar.cc/400?img=11', is_demo = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=11', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000014';
 update public.profiles set display_name = 'Elena Quiroga', handle = '@elena.foto', bio = 'Fotógrafa inmobiliaria: haz que tu propiedad se venda sola.', location = 'Centro',
   interests = array['amigos']::text[], zones = array['Centro', 'Zona Norte']::text[], relations = array['amistad', 'pareja']::text[], lifestyle = array['Creativa', 'Viajera', 'Deportista']::text[], budget = null,
   age = 34, sign = 'leo', professional = '{"headline":"Fotógrafa y video inmobiliario","skills":["Fotografía HDR","Drone","Tour 360°","Edición"],"portfolio":["https://images.unsplash.com/photo-1600585154340-be6161a56a0c?w=600&q=75&auto=format&fit=crop","https://images.unsplash.com/photo-1512917774080-9991f1c4c750?w=600&q=75&auto=format&fit=crop","https://images.unsplash.com/photo-1522708323590-d24dbb6b0267?w=600&q=75&auto=format&fit=crop"]}'::jsonb, badges = array['freelancer-top', 'respuesta-rapida']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 5, reviews_count = 64, response_rate = 99,
-  avatar_url = 'https://i.pravatar.cc/400?img=47', is_demo = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=47', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000015';
 update public.profiles set display_name = 'Marcos Duarte', handle = '@marcos.arq', bio = 'Arquitecto: remodelaciones, planos y dirección de obra.', location = 'Zona Sur',
   interests = array['inversor']::text[], zones = array['Zona Sur', 'Valle Alto']::text[], relations = array['socios']::text[], lifestyle = array['Emprendedor', 'Lector']::text[], budget = null,
   age = 45, sign = 'capricornio', professional = '{"headline":"Arquitecto y director de obra","skills":["Planos","Remodelación","Render 3D","Permisos"],"portfolio":["https://images.unsplash.com/photo-1503387762-592deb58ef4e?w=600&q=75&auto=format&fit=crop","https://images.unsplash.com/photo-1580587771525-78b9dba3b914?w=600&q=75&auto=format&fit=crop"]}'::jsonb, badges = array['freelancer-top']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.8, reviews_count = 37, response_rate = 92,
-  avatar_url = 'https://i.pravatar.cc/400?img=53', is_demo = true, created_at = make_timestamptz(2020, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=53', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2020, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000016';
 update public.profiles set display_name = 'Nicolás Ferro', handle = '@nico.plomero', bio = 'Plomería y gasfitería 24 h. Presupuesto sin cargo.', location = 'Zona Norte',
   interests = array['amigos']::text[], zones = array['Zona Norte', 'Centro']::text[], relations = array['amistad']::text[], lifestyle = array['Deportista', 'Familiar']::text[], budget = null,
   age = 42, sign = 'aries', professional = '{"headline":"Plomero matriculado","skills":["Fugas","Instalaciones","Calefones","Urgencias"],"portfolio":["https://images.unsplash.com/photo-1504148455328-c376907d081c?w=600&q=75&auto=format&fit=crop"]}'::jsonb, badges = array['respuesta-rapida']::text[],
   identity_verified = true, phone_verified = true, email_verified = false,
   kyc_status = 'verified', rating = 4.7, reviews_count = 88, response_rate = 96,
-  avatar_url = 'https://i.pravatar.cc/400?img=54', is_demo = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=54', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000017';
 update public.profiles set display_name = 'Renata Silva', handle = '@renata.legal', bio = 'Abogada inmobiliaria: escrituras, contratos y sucesiones.', location = 'Centro',
   interests = array['inversor']::text[], zones = array['Centro']::text[], relations = array['socios', 'amistad']::text[], lifestyle = array['Lectora', 'Viajera']::text[], budget = null,
   age = 39, sign = 'libra', professional = '{"headline":"Abogada especialista en derecho inmobiliario","skills":["Contratos","Escrituras","Due diligence","Sucesiones"],"portfolio":["https://images.unsplash.com/photo-1589829545856-d10d557cf95f?w=600&q=75&auto=format&fit=crop"]}'::jsonb, badges = array['freelancer-top']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 52, response_rate = 94,
-  avatar_url = 'https://i.pravatar.cc/400?img=9', is_demo = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=9', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2021, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000018';
 update public.profiles set display_name = 'Mariana Ortiz', handle = '@luna.tarot', bio = 'Tarotista y astróloga. Lecturas con cariño y sin promesas mágicas ✨', location = 'Barrio Histórico',
   interests = array['amigos']::text[], zones = array['Barrio Histórico']::text[], relations = array['amistad', 'pareja']::text[], lifestyle = array['Espiritual', 'Nocturna', 'Mascotas']::text[], budget = null,
   age = 35, sign = 'piscis', professional = '{"headline":"Tarotista y astróloga","skills":["Tarot","Carta astral","Sinastría","Retorno solar"],"portfolio":["https://images.unsplash.com/photo-1601158935942-52255782d322?w=600&q=75&auto=format&fit=crop"]}'::jsonb, badges = array['guia-astral', 'respuesta-rapida']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 120, response_rate = 97,
-  avatar_url = 'https://i.pravatar.cc/400?img=24', is_demo = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=24', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2022, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000019';
 update public.profiles set display_name = 'Gabriel Lima', handle = '@gabo.diseno', bio = 'Diseñador gráfico y de marca para negocios inmobiliarios.', location = 'Centro',
   interests = array['amigos']::text[], zones = array['Centro']::text[], relations = array['amistad', 'pareja', 'socios']::text[], lifestyle = array['Creativo', 'Gamer', 'Foodie']::text[], budget = null,
   age = 30, sign = 'geminis', professional = '{"headline":"Diseñador de marca y contenido","skills":["Logos","Branding","Redes sociales","Presentaciones"],"portfolio":["https://images.unsplash.com/photo-1561070791-2526d30994b5?w=600&q=75&auto=format&fit=crop"]}'::jsonb, badges = array['freelancer-top']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.8, reviews_count = 41, response_rate = 91,
-  avatar_url = 'https://i.pravatar.cc/400?img=14', is_demo = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=14', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000020';
 update public.profiles set display_name = 'Sebastián Vera', handle = '@sebas.vera', bio = 'Amante de los viajes y del buen café. Busco conexión real, sin prisa.', location = 'Puerto Nuevo',
   interests = array['amigos', 'comprador']::text[], zones = array['Puerto Nuevo', 'Centro']::text[], relations = array['pareja', 'amistad']::text[], lifestyle = array['Viajero', 'Deportista', 'Foodie']::text[], budget = null,
   age = 33, sign = 'sagitario', professional = null, badges = array['explorador']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.7, reviews_count = 6, response_rate = 90,
-  avatar_url = 'https://i.pravatar.cc/400?img=57', is_demo = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=57', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000021';
 update public.profiles set display_name = 'Antonella Ríos', handle = '@anto.rios', bio = 'Psicóloga, lectora y fan de las plantas. Busco algo bonito y honesto.', location = 'Barrio Histórico',
   interests = array['amigos', 'inquilino']::text[], zones = array['Barrio Histórico', 'Centro']::text[], relations = array['pareja']::text[], lifestyle = array['Lectora', 'Espiritual', 'Amante de las plantas']::text[], budget = null,
   age = 30, sign = 'escorpio', professional = null, badges = array['vecino-activo']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.9, reviews_count = 9, response_rate = 96,
-  avatar_url = 'https://i.pravatar.cc/400?img=21', is_demo = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=21', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2024, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000022';
 update public.profiles set display_name = 'Mateo Blanco', handle = '@mateo.blanco', bio = 'Emprendedor serial. Busco socios y gente con ganas de construir cosas.', location = 'Zona Norte',
   interests = array['inversor', 'amigos']::text[], zones = array['Zona Norte', 'Las Lomas']::text[], relations = array['socios', 'amistad']::text[], lifestyle = array['Emprendedor', 'Viajero', 'Nocturno']::text[], budget = 'USD 50–200 mil',
   age = 34, sign = 'acuario', professional = null, badges = array['inversor-pro']::text[],
   identity_verified = true, phone_verified = true, email_verified = true,
   kyc_status = 'verified', rating = 4.6, reviews_count = 10, response_rate = 88,
-  avatar_url = 'https://i.pravatar.cc/400?img=68', is_demo = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
+  avatar_url = 'https://i.pravatar.cc/400?img=68', is_demo = true, onboarding_completed = true, created_at = make_timestamptz(2023, 3, 1, 0, 0, 0)
 where id = '00000000-0000-4000-8000-000000000023';
 
 insert into public.listings (id, owner_id, kind, category, operation, subtype, title, description, price, currency, zone, area, attrs, images, flash_discount, flash_until, created_at)
