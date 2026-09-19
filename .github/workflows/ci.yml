@@ -1,0 +1,47 @@
+name: CI
+
+# Cada push y cada pull request: tipos, lint, compilación y pruebas.
+# El despliegue lo hace Vercel al integrarse con este repositorio (ver README > Despliegue automatizado).
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: Tipos · lint · build
+    runs-on: ubuntu-latest
+    env:
+      # Valores de relleno: la compilación no se conecta a Supabase.
+      NEXT_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run lint
+      - run: npm run build
+
+  tests:
+    name: Pruebas (PostgreSQL embebido)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm i --no-save embedded-postgres pg tsx
+      - run: npx tsx supabase/tests/ui-logica.test.mjs
+      - run: npx tsx supabase/tests/media.test.mjs
+      - run: npx tsx supabase/tests/db.test.mjs

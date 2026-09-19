@@ -9,7 +9,8 @@ import GaleriaFotos from "@/features/fotos/GaleriaFotos";
 import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
 import { sincronizarFotos } from "@/features/fotos/sincronizar";
 import type { ItemFoto } from "@/features/fotos/tipos";
-import { BORRADOR_VACIO, edadDesde, normalizarUsuario, PASOS, type Borrador, type Errores } from "@/features/onboarding/validacion";
+import { BORRADOR_VACIO, edadDesde, estaturaCm, MAX_PAREJA_IDEAL, MIN_PAREJA_IDEAL, normalizarUsuario, PASOS, type Borrador, type Errores } from "@/features/onboarding/validacion";
+import { MARCA_BIENVENIDA } from "@/components/BienvenidaModal";
 import { signoDeFecha } from "@/lib/astrologia";
 import { ETIQUETA_INTERES, ETIQUETA_RELACION, INTERESES_EDITABLES } from "@/lib/social";
 import type { Interes, TipoRelacion } from "@/types/social";
@@ -80,6 +81,10 @@ export default function Onboarding() {
       usuario: y.usuario.replace(/^@/, ""),
       nacimiento: y.nacimiento ?? "",
       ubicacion: y.ubicacion,
+      universidad: y.universidad ?? "",
+      colegio: y.colegio ?? "",
+      estatura: y.estatura ? String(y.estatura) : "",
+      parejaIdeal: y.parejaIdeal ?? "",
       intereses: y.intereses,
       zonas: y.zonas,
       relaciones: y.relaciones ?? [],
@@ -143,6 +148,10 @@ export default function Onboarding() {
       usuario: `@${normalizarUsuario(b.usuario || b.nombre)}`,
       bio: b.bio.trim() || undefined,
       ubicacion: b.ubicacion.trim(),
+      universidad: b.universidad.trim(),
+      colegio: b.colegio.trim(),
+      estatura: estaturaCm(b.estatura) ?? undefined,
+      parejaIdeal: b.parejaIdeal.trim(),
       edad: edadDesde(b.nacimiento) ?? undefined,
       intereses: b.intereses,
       zonas: b.zonas,
@@ -173,13 +182,16 @@ export default function Onboarding() {
     setProgreso(null);
     if (r.errores.length > 0 || r.ids.length === 0) {
       setFallos(r.errores.length ? r.errores : ["No se pudo subir ninguna foto."]);
-      setPaso(2);
+      setPaso(PASOS.findIndex((p) => p.id === "fotos"));
       setEnviando(false);
       return;
     }
 
     await refrescarPerfil();
     if (await completarOnboarding()) {
+      try {
+        localStorage.setItem(MARCA_BIENVENIDA, sesion.uid ?? "1"); // la portada mostrará la bienvenida una sola vez
+      } catch {}
       router.replace("/");
     }
     setEnviando(false);
@@ -211,11 +223,11 @@ export default function Onboarding() {
       </nav>
 
       <h1 ref={titulo} tabIndex={-1} className="text-2xl font-bold outline-none">
-        {["Cuéntanos sobre ti", "¿Qué te interesa?", "Añade tus fotos", "Último vistazo"][paso]}
+        {["Cuéntanos sobre ti", "¿Qué te interesa?", "¿Cómo es tu pareja ideal?", "Añade tus fotos", "Último vistazo"][paso]}
       </h1>
       <p className="mt-1 text-sm text-slate-500">
         Paso {paso + 1} de {PASOS.length} ·{" "}
-        {["Lo básico para tu perfil público.", "Nos ayuda a mostrarte gente y ofertas afines.", "Hasta 10 fotos. La primera será tu foto principal.", "Revisa y confirma."][paso]}
+        {["Lo básico para tu perfil público.", "Nos ayuda a mostrarte gente y ofertas afines.", "Con tus palabras: así encontramos a quien de verdad encaja.", "Hasta 10 fotos. La primera será tu foto principal.", "Revisa y confirma."][paso]}
       </p>
 
       <div className="mt-6 space-y-5">
@@ -237,6 +249,18 @@ export default function Onboarding() {
             <Campo id="ob-ubi" label="Ciudad o barrio (opcional)">
               <input id="ob-ubi" value={b.ubicacion} onChange={(e) => actualizar("ubicacion", e.target.value)} maxLength={60} className={campo} />
             </Campo>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Campo id="ob-uni" label="Universidad a la que asististe" error={errores.universidad}>
+                <input id="ob-uni" value={b.universidad} onChange={(e) => actualizar("universidad", e.target.value)} maxLength={120} autoComplete="organization" aria-invalid={!!errores.universidad} className={campo} />
+              </Campo>
+              <Campo id="ob-col" label="Colegio al que asististe" error={errores.colegio}>
+                <input id="ob-col" value={b.colegio} onChange={(e) => actualizar("colegio", e.target.value)} maxLength={120} aria-invalid={!!errores.colegio} className={campo} />
+              </Campo>
+            </div>
+            <Campo id="ob-est" label="Estatura en cm (opcional, permite que te encuentren con filtros)" error={errores.estatura}>
+              <input id="ob-est" inputMode="decimal" value={b.estatura} onChange={(e) => actualizar("estatura", e.target.value)} maxLength={5} placeholder="170" aria-invalid={!!errores.estatura} className={campo} />
+            </Campo>
+            <p className="text-xs text-slate-500">Universidad y colegio se muestran en tu perfil y ayudan a encontrar afinidades reales (excompañeros, colegas, ciudad).</p>
           </>
         )}
 
@@ -265,6 +289,32 @@ export default function Onboarding() {
 
         {paso === 2 && (
           <>
+            <Campo id="ob-pareja" label={`Describe a tu pareja ideal — ${b.parejaIdeal.trim().length}/${MAX_PAREJA_IDEAL}`} error={errores.parejaIdeal}>
+              <textarea
+                id="ob-pareja"
+                value={b.parejaIdeal}
+                onChange={(e) => actualizar("parejaIdeal", e.target.value)}
+                rows={7}
+                maxLength={MAX_PAREJA_IDEAL}
+                aria-invalid={!!errores.parejaIdeal}
+                aria-describedby="ob-pareja-ayuda"
+                placeholder="Cómo es su forma de ser, qué valores comparte, qué le gusta hacer, cómo pasan un domingo, qué proyecto de vida imaginas juntos…"
+                className={campo}
+              />
+            </Campo>
+            <div id="ob-pareja-ayuda" className="rounded-xl bg-brand-50 p-4 text-sm text-slate-700">
+              <p className="font-semibold text-brand-800">Cómo usamos este texto</p>
+              <p className="mt-1">
+                Nuestro motor lo compara con cómo se describen los demás perfiles y te propone las personas que más encajan. <strong>Nadie más puede leerlo</strong>: solo tú.
+                {b.parejaIdeal.trim().length < MIN_PAREJA_IDEAL && ` Escribe al menos ${MIN_PAREJA_IDEAL} caracteres.`}
+              </p>
+              <p className="mt-2 text-xs text-slate-500">Consejo: cuanto más concreto (valores, aficiones, ritmo de vida), mejores recomendaciones.</p>
+            </div>
+          </>
+        )}
+
+        {paso === 3 && (
+          <>
             <GaleriaFotos items={b.fotos} onChange={(f) => actualizar("fotos", f)} deshabilitado={enviando} />
             {errores.fotos && (
               <p role="alert" className="text-sm text-rose-600">
@@ -285,7 +335,7 @@ export default function Onboarding() {
           </>
         )}
 
-        {paso === 3 && (
+        {paso === 4 && (
           <>
             <Campo id="ob-bio" label={`Sobre ti (opcional) — ${b.bio.length}/300`} error={errores.bio}>
               <textarea id="ob-bio" value={b.bio} onChange={(e) => actualizar("bio", e.target.value)} rows={4} maxLength={300} placeholder="Cuéntale a la comunidad qué buscas y cómo eres…" className={campo} />
@@ -307,6 +357,7 @@ export default function Onboarding() {
                   <div className="text-slate-500">@{normalizarUsuario(b.usuario || b.nombre)}</div>
                   <div className="text-slate-600">{b.intereses.map((i) => ETIQUETA_INTERES[i]).join(" · ")}</div>
                   <div className="text-slate-600">📍 {b.zonas.join(" · ")}</div>
+                  <div className="text-slate-600">🎓 {b.universidad.trim()} · 🏫 {b.colegio.trim()}</div>
                   <div className="text-slate-500">📸 {b.fotos.length} {b.fotos.length === 1 ? "foto" : "fotos"}</div>
                 </dl>
               </div>

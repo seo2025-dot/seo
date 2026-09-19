@@ -672,6 +672,11 @@ await test("seed.sql se aplica (y es idempotente): perfiles demo, ofertas, búsq
   assert.ok(pares.some((p) => /Departamento céntrico/.test(p.title)), "la búsqueda de Bruno debería coincidir con el depto céntrico");
   assert.equal(await c("select count(*)::int n from public.notifications where user_id in (select id from public.profiles where id::text like '00000000-0000-4000-8000-%')"), 0);
   assert.ok((await c("select trust_score n from public.profiles where handle = '@lucia.ferrer'")) >= 90);
+  // Ningún perfil demo se muestra con iniciales: todos traen avatar, distinto para cada uno.
+  const avatares = await q("select avatar_url from public.profiles where id::text like '00000000-0000-4000-8000-%'");
+  assert.ok(avatares.every((a) => a.avatar_url && /^https:\/\/i\.pravatar\.cc\/400\?img=\d+$/.test(a.avatar_url)), "hay perfiles demo sin avatar");
+  assert.equal(new Set(avatares.map((a) => a.avatar_url)).size, avatares.length, "avatares repetidos");
+  assert.equal(avatares.length, 23);
 });
 
 // ── 7b. Fotos de perfil (máx. 10), onboarding y simulación de personas ──────
@@ -740,6 +745,14 @@ await test("complete_onboarding valida en el servidor: nombre, usuario, fecha de
   assert.equal((await q("select onboarding_completed from public.profiles where id = $1", [gus]))[0].onboarding_completed, false);
   await falla(como(gus, "select public.complete_onboarding()"), /fecha de nacimiento/);
   await como(gus, "update public.user_private set birth_date = '1990-05-05' where user_id = $1", [gus]);
+  await falla(como(gus, "select public.complete_onboarding()"), /falta tu universidad/);
+  await como(gus, "update public.profiles set university = 'Universidad Nacional' where id = $1", [gus]);
+  await falla(como(gus, "select public.complete_onboarding()"), /falta tu colegio/);
+  await como(gus, "update public.profiles set school = 'Colegio San José' where id = $1", [gus]);
+  await falla(como(gus, "select public.complete_onboarding()"), /pareja ideal/);
+  await como(gus, "update public.user_private set ideal_partner = 'corto' where user_id = $1", [gus]);
+  await falla(como(gus, "select public.complete_onboarding()"), /pareja ideal/);
+  await como(gus, "update public.user_private set ideal_partner = 'Alguien alegre, curioso y que ame viajar' where user_id = $1", [gus]);
   await falla(como(gus, "select public.complete_onboarding()"), /al menos una foto/);
   await addFoto(gus, 0);
   await falla(como(gus, "update public.profiles set onboarding_completed = true where id = $1", [gus]), /permission denied/);
@@ -770,38 +783,72 @@ await test("admin_simulate: solo administradores y solo como personas demo; like
   assert.ok((await como(dora, "select 1 from public.friendships where requester_id = $1 and status = 'pending'", [otra])).length === 1);
   await falla(como(admin, "select public.admin_simulate($1,'bomba',$2)", [otra, dora]), /inválida/);
 });
-await test("Persona Engine: seed_personas.sql (fichero generado) crea 3 personas completas con 10 fotos, es idempotente y coincide con el generador", async () => {
+await test("Persona Engine: seed_personas.sql crea 5 personas de Ecuador completas, con fotos de retrato, es idempotente y coincide con el generador", async () => {
   const { generarSql } = await import("../seed/personas.ts");
-  const fichero = fs.readFileSync(path.join(aqui, "..", "seed_personas.sql"), "utf8");
-  assert.equal(fichero, generarSql(3), "seed_personas.sql está desactualizado: ejecuta npx tsx supabase/seed/personas.ts");
+  const fichero = fs.readFileSync(path.join(aqui, "..", "seed_personas.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(fichero, generarSql(5), "seed_personas.sql está desactualizado: ejecuta npx tsx supabase/seed/personas.ts");
+  const ids = [1, 2, 3, 4, 5].map((n) => `00000000-0000-4000-8000-${String(100 + n).padStart(12, "0")}`);
+  // Simula una base con el seed ANTIGUO ya aplicado (fotos de picsum, incluidas posiciones 6–9): debe quedar reemplazado, no mezclado.
+  await su.query(generarSql(3).replace(/https:\/\/i\.pravatar\.cc\/\d+\?img=\d+/g, "https://picsum.photos/seed/viejo/900/1200"));
+  await q("insert into public.profile_photos (user_id, sort_order, storage_path, thumb_path) select $1, g, 'https://picsum.photos/seed/viejo-' || g, 'https://picsum.photos/seed/viejo-' || g from generate_series(6, 9) g", [ids[0]]);
   await su.query(fichero);
-  await su.query(fichero);
-  const ids = [1, 2, 3].map((n) => `00000000-0000-4000-8000-${String(100 + n).padStart(12, "0")}`);
-  for (const id of ids) {
-    const f = await fotosDe(id);
-    assert.deepEqual(f.map((x) => x.sort_order), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9], "cada persona debe tener 10 fotos ordenadas");
-    const [p] = await q("select display_name, handle, is_demo, onboarding_completed, avatar_url, sign, (select birth_date from public.user_private where user_id = id) nac from public.profiles where id = $1", [id]);
-    assert.ok(p.display_name && p.handle && p.is_demo && p.onboarding_completed && p.sign && p.nac, `perfil incompleto: ${JSON.stringify(p)}`);
-    const [{ thumb_path }] = await q("select thumb_path from public.profile_photos where user_id = $1 and sort_order = 0", [id]);
-    assert.equal(p.avatar_url, thumb_path, "el avatar debe ser la miniatura de la foto principal");
+  await su.query(fichero); // idempotente
+  const escenasPropias = new Set();
+  for (const [i, id] of ids.entries()) {
+    const f = await q("select sort_order, storage_path, thumb_path, mime from public.profile_photos where user_id = $1 order by sort_order", [id]);
+    assert.ok(f.length >= 5 && f.length <= 10, `persona ${i + 1}: ${f.length} fotos`);
+    assert.deepEqual(f.map((x) => x.sort_order), f.map((_, k) => k), "las fotos deben ocupar posiciones consecutivas desde 0");
+    assert.ok(f.every((x) => /^https:\/\/(i\.pravatar\.cc|thumb\.wikimedia\.org)\//.test(x.storage_path) && x.mime === "image/jpeg"), "solo retratos y escenas verificadas; nada de picsum");
+    assert.match(f[0].storage_path, /pravatar\.cc\/900\?img=\d+$/, "la foto 0 es el retrato");
+    assert.ok(f.slice(1).every((x) => /wikimedia/.test(x.storage_path)), "el resto son escenas de su ciudad");
+    for (const x of f) {
+      assert.ok(!escenasPropias.has(x.storage_path), "las galerías no repiten fotos entre personas");
+      escenasPropias.add(x.storage_path);
+    }
+    const [p] = await q("select display_name, handle, bio, location, is_demo, onboarding_completed, avatar_url, sign, age, height_cm, university, school, professional, (select birth_date from public.user_private where user_id = id) nac, (select char_length(ideal_partner) from public.user_private where user_id = id) largo from public.profiles where id = $1", [id]);
+    assert.ok(p.display_name && p.handle && p.is_demo && p.onboarding_completed && p.sign && p.nac && p.age >= 18, `perfil incompleto: ${JSON.stringify(p)}`);
+    assert.ok(p.university && p.school && p.height_cm >= 150 && p.largo >= 200 && p.professional?.headline, "faltan formación, estatura, pareja ideal o profesión");
+    assert.ok(p.bio.length >= 150 && p.bio.length <= 300 && /Cuenca|Quito|Guayaquil/.test(p.location), "biografía sustancial y ubicada en Ecuador");
+    assert.equal(p.avatar_url, f[0].thumb_path, "el avatar debe ser la miniatura de la foto principal (nunca vacío: sin iniciales)");
   }
-  assert.equal((await q("select count(distinct storage_path)::int n from public.profile_photos where user_id = any($1)", [ids]))[0].n, 30, "las 30 fotos deben ser distintas");
-  // A escala: 200 personas × 10 fotos entran sin errores y respetan el máximo.
+  assert.deepEqual((await q("select location from public.profiles where id = any($1) order by id", [ids])).map((x) => x.location.split(" ·")[0]), ["Cuenca", "Quito", "Guayaquil", "Cuenca", "Quito"]);
+  assert.equal((await q("select count(*)::int n from public.profile_photos where user_id = any($1) and storage_path like '%picsum%'", [ids]))[0].n, 0, "el seed antiguo queda reemplazado");
+  // No rompe nada existente: siguen funcionando el motor de recomendación y las funciones de swipe con estas personas.
+  const invitada = await nuevoUsuario("VisitaEcuador");
+  await q("update public.profiles set onboarding_completed = true, age = 30, university = 'Universidad de Cuenca', school = 'Colegio Benigno Malo', interests = '{amigos}', zones = '{Centro}' where id = $1", [invitada]);
+  await q("update public.user_private set ideal_partner = 'Alguien sensible al arte, la música y la naturaleza, honesto y con ganas de construir un hogar' where user_id = $1", [invitada]);
+  const rec = await como(invitada, "select * from public.recommend_people(p_limit => 60)");
+  const emilia = rec.find((r) => r.person_id === ids[0]), seb = rec.find((r) => r.person_id === ids[3]);
+  assert.ok(emilia && seb, "las personas de Ecuador aparecen en las recomendaciones");
+  assert.ok(emilia.reasons.includes("Comparten universidad") && emilia.reasons.includes("Fueron al mismo colegio"), emilia.reasons.join("|"));
+  assert.ok(emilia.score >= 40, `emilia=${emilia.score}`);
+  assert.ok(["liked", "match"].includes((await como(invitada, "select public.swipe_person($1, 'like') r", [ids[0]]))[0].r.result)); // las personas demo corresponden 2 de cada 3 likes
+  // Sin colisión de usuario: si una persona real ya tiene ese @usuario, el seed no falla ni lo pisa.
+  const real = await nuevoUsuario("UsuarioReal");
+  await q("update public.profiles set handle = '@temporal.emilia' where id = $1", [ids[0]]);
+  await q("update public.profiles set handle = '@emilia.vintimilla' where id = $1", [real]);
+  await su.query(fichero);
+  assert.equal((await q("select handle from public.profiles where id = $1", [real]))[0].handle, "@emilia.vintimilla");
+  assert.equal((await q("select handle from public.profiles where id = $1", [ids[0]]))[0].handle, "@temporal.emilia");
+  await q("update public.profiles set handle = '@real.' || substr(id::text, 1, 6) where id = $1", [real]);
+  await su.query(fichero);
+  assert.equal((await q("select handle from public.profiles where id = $1", [ids[0]]))[0].handle, "@emilia.vintimilla");
+  // A escala: 200 personas (195 de relleno × 10 fotos) entran sin errores y respetan el máximo.
   const t0 = Date.now();
   await su.query(generarSql(200));
-  assert.equal((await q("select count(*)::int n from public.profile_photos where user_id::text like '00000000-0000-4000-8000-%' and user_id = any(select id from public.profiles where handle like '@sim.%')"))[0].n, 197 * 10);
+  assert.equal((await q("select count(*)::int n from public.profile_photos where user_id::text like '00000000-0000-4000-8000-%' and user_id = any(select id from public.profiles where handle like '@sim.%')"))[0].n, 195 * 10);
   assert.ok(Date.now() - t0 < 30_000, "200 personas deberían cargarse en menos de 30 s");
 });
 await test("la función interna _swipe_person no es invocable por clientes", async () => {
   await falla(como(dora, "select public._swipe_person($1,$2,'like','pareja',true)", [dora, edu]), /permission denied/);
 });
 await test("MIGRACIÓN: esquema base + update_002 (dos veces) deja el mismo resultado y marca los perfiles previos como completos", async () => {
-  const completo = fs.readFileSync(esquema, "utf8");
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n"); // Windows con autocrlf: schema.sql llega con CRLF
   const ini = completo.indexOf("-- ACTUALIZACION-002-INICIO");
   const fin = completo.indexOf("-- ACTUALIZACION-002-FIN");
   assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización en schema.sql");
   const base = completo.slice(0, ini);
-  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_002_fotos_onboarding.sql"), "utf8");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_002_fotos_onboarding.sql"), "utf8").replace(/\r\n/g, "\n");
   // El contenido incrustado en schema.sql debe ser idéntico al del archivo de actualización.
   assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_002 difieren");
   await server.createDatabase("migracion");
@@ -821,6 +868,180 @@ await test("MIGRACIÓN: esquema base + update_002 (dos veces) deja el mismo resu
     assert.deepEqual(filas.map((f) => [f.email, f.onboarding_completed]), [["antiguo@test.dev", true], ["nuevo@test.dev", false]]);
     const fns = (await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in ('add_profile_photo','delete_profile_photo','reorder_profile_photos','complete_onboarding','admin_simulate','_swipe_person')")).rows[0].n;
     assert.equal(fns, 6);
+  } finally {
+    await m.end();
+  }
+});
+
+// ── 7b. Perfil académico, recomendación, referidos, retos diarios ───────────
+console.log("\nConexión: recomendación, referidos y retos diarios");
+const perfilListo = (uid, campos) =>
+  q(`update public.profiles set onboarding_completed = true, age = $2, height_cm = $3, bio = $4, university = $5, school = $6, interests = $7, zones = $8 where id = $1`,
+    [uid, campos.edad, campos.altura, campos.bio ?? "", campos.uni ?? null, campos.colegio ?? null, campos.intereses ?? [], campos.zonas ?? []]);
+const completarPerfil = async (uid, n = 0) => {
+  await q("update public.user_private set birth_date = '1992-02-02', ideal_partner = 'Alguien alegre, sincero y con ganas de crecer juntos' where user_id = $1", [uid]);
+  await q("update public.profiles set university = 'Universidad Central', school = 'Colegio Norte' where id = $1", [uid]);
+  await addFoto(uid, n);
+  await como(uid, "select public.complete_onboarding()");
+};
+
+const yo3 = await nuevoUsuario("Yo3");
+const afin = await nuevoUsuario("Afin");
+const lejano = await nuevoUsuario("Lejano");
+await perfilListo(yo3, { edad: 30, altura: 170, bio: "Soy ingeniera", uni: "Universidad Central", colegio: "Colegio Norte", intereses: ["amigos"], zonas: ["Centro"] });
+await perfilListo(afin, { edad: 31, altura: 182, bio: "Me encanta viajar, cocinar y el deporte", uni: "universidad  CENTRAL", colegio: "Colegio Sur", intereses: ["amigos"], zonas: ["Centro"] });
+await perfilListo(lejano, { edad: 45, altura: 158, bio: "Coleccionista de sellos antiguos", uni: "Otra", colegio: "Otro", zonas: ["Norte"] });
+await q("update public.user_private set ideal_partner = 'Alguien que ame viajar, cocinar y practicar deporte' where user_id = $1", [yo3]);
+await q("update public.user_private set ideal_partner = 'Alguien tranquila que sepa de ingeniería' where user_id = $1", [afin]);
+await test("recommend_people: ordena por compatibilidad (pareja ideal + universidad + intereses) y explica los motivos", async () => {
+  const r = await como(yo3, "select * from public.recommend_people(p_limit => 60)");
+  const a = r.find((x) => x.person_id === afin);
+  assert.ok(a, "falta el candidato afín");
+  assert.equal(r[0].person_id, afin, "el más afín va primero");
+  assert.ok(a.score >= 45 && a.score <= 100, `afín=${a.score}`);
+  assert.ok(a.score >= r[1].score + 20, "se distingue claramente del resto");
+  assert.ok(a.reasons.some((m) => /pareja ideal/.test(m)) && a.reasons.includes("Comparten universidad") && a.reasons.includes("Intereses en común"), a.reasons.join("|"));
+  assert.ok(!r.some((x) => x.person_id === yo3), "no debe recomendarse a sí mismo");
+  const [l] = (await como(yo3, "select * from public.recommend_people(p_min_age => 44, p_max_age => 46, p_min_height => 155, p_max_height => 160)")).filter((x) => x.person_id === lejano);
+  assert.ok(l && l.score <= 10 && l.reasons.length === 0, "quien no encaja puntúa casi nada y sin motivos");
+});
+await test("recommend_people: filtros de edad y estatura", async () => {
+  const ids = async (args) => (await como(yo3, `select person_id from public.recommend_people(${args}, p_limit => 60)`)).map((x) => x.person_id);
+  const porEdad = await ids("p_min_age => 44, p_max_age => 46, p_min_height => 150");
+  assert.ok(porEdad.includes(lejano) && !porEdad.includes(afin));
+  const combinado = await ids("p_min_age => 31, p_max_age => 31, p_min_height => 180");
+  assert.ok(combinado.includes(afin) && !combinado.includes(lejano));
+  assert.deepEqual(await ids("p_min_height => 200"), []);
+  const bajos = await ids("p_min_age => 40, p_max_height => 160");
+  assert.ok(bajos.includes(lejano) && !bajos.includes(afin));
+  assert.ok(!(await ids("p_max_age => 30")).includes(afin), "31 años queda fuera de un máximo de 30");
+  const rango = await como(yo3, "select p.age, p.height_cm from public.recommend_people(p_min_age => 25, p_max_age => 35, p_min_height => 165, p_max_height => 190, p_limit => 60) r join public.profiles p on p.id = r.person_id");
+  assert.ok(rango.length >= 1 && rango.every((x) => x.age >= 25 && x.age <= 35 && x.height_cm >= 165 && x.height_cm <= 190));
+  assert.equal((await como(yo3, "select * from public.recommend_people(p_limit => 1)")).length, 1);
+});
+await test("recommend_people: oculta a quien descartaste y exige sesión", async () => {
+  await como(yo3, "select public.swipe_person($1, 'pass')", [lejano]);
+  assert.equal((await como(yo3, "select person_id from public.recommend_people()")).some((x) => x.person_id === lejano), false);
+  await falla(como(null, "select * from public.recommend_people()"), /permission denied|No autenticado/);
+});
+await test("la descripción de la pareja ideal es privada (solo su dueña o dueño la lee) y no sale en ninguna función", async () => {
+  assert.equal((await como(afin, "select ideal_partner from public.user_private where user_id = $1", [yo3])).length, 0);
+  assert.match((await como(yo3, "select ideal_partner from public.user_private where user_id = $1", [yo3]))[0].ideal_partner, /viajar/);
+  const cols = (await como(yo3, "select * from public.recommend_people(p_limit => 1)"))[0];
+  assert.deepEqual(Object.keys(cols).sort(), ["person_id", "reasons", "score"]);
+  await falla(como(yo3, "select public._lex('x')"), /permission denied/);
+});
+await test("los campos académicos: se editan solo en el propio perfil y respetan sus rangos", async () => {
+  await como(yo3, "update public.profiles set university = 'U Nueva', school = 'Colegio Nuevo', height_cm = 171 where id = $1", [yo3]);
+  await falla(como(yo3, "update public.profiles set height_cm = 50 where id = $1", [yo3]), /height_cm|check/);
+  assert.equal((await como(afin, "update public.profiles set school = 'x' where id = $1 returning id", [yo3])).length, 0);
+  await falla(como(yo3, "update public.profiles set referral_code = 'robado' where id = $1", [yo3]), /permission denied/);
+});
+
+const anfitrion = await nuevoUsuario("Anfitrion");
+const codigo = (await q("select referral_code from public.profiles where id = $1", [anfitrion]))[0].referral_code;
+await test("referidos: el código se genera solo; el registro con ?ref crea el vínculo; el autorreferido y códigos falsos no", async () => {
+  assert.match(codigo, /^[0-9a-f]{10}$/);
+  const i1 = await nuevoUsuario("Invitado1", { ref: codigo.toUpperCase() });
+  assert.equal((await q("select referrer_id from public.referrals where referred_id = $1", [i1]))[0].referrer_id, anfitrion);
+  await nuevoUsuario("ConCodigoFalso", { ref: "no-existe" }); // no debe impedir el registro
+  assert.equal((await como(anfitrion, "select public.apply_referral($1) ok", [codigo]))[0].ok, false);
+  const i2 = await nuevoUsuario("Invitado2");
+  assert.equal((await como(i2, "select public.apply_referral($1) ok", [codigo]))[0].ok, true);
+  assert.equal((await como(i2, "select public.apply_referral($1) ok", [codigo]))[0].ok, false, "un usuario solo puede tener un invitador");
+  assert.equal((await como(i2, "select public.apply_referral('zzz') ok"))[0].ok, false);
+  assert.equal((await como(i2, "select count(*)::int n from public.referrals"))[0].n, 1, "el invitado ve solo su vínculo");
+  assert.equal((await como(dora, "select count(*)::int n from public.referrals"))[0].n, 0, "terceros no ven la red");
+});
+await test("referidos: se paga una sola vez al completar el perfil; hitos 3 → +50 extra; estadísticas y ranking", async () => {
+  const ref = (await q("select referred_id from public.referrals where referrer_id = $1 order by created_at", [anfitrion])).map((r) => r.referred_id);
+  assert.equal(ref.length, 2);
+  const base = await monedas(anfitrion);                        // 20 de bienvenida
+  await completarPerfil(ref[0], 0);
+  assert.equal(await monedas(anfitrion), base + 50);
+  assert.equal(await monedas(ref[0]), 20 + 25, "el invitado también recibe su bienvenida");
+  await como(ref[0], "select public.complete_onboarding()");    // repetirlo no vuelve a pagar
+  assert.equal(await monedas(anfitrion), base + 50);
+  await completarPerfil(ref[1], 0);
+  const i3 = await nuevoUsuario("Invitado3", { ref: codigo });
+  await completarPerfil(i3, 0);                                  // tercer invitado confirmado
+  assert.equal(await monedas(anfitrion), base + 3 * 50 + 50, "hito de 3 invitados");
+  const st = (await como(anfitrion, "select public.referral_stats() s"))[0].s;
+  assert.deepEqual([st.invited, st.confirmed, st.coins_earned, st.code], [3, 3, 200, codigo]);
+  const top = await como(anfitrion, "select * from public.referral_leaderboard(5)");
+  assert.equal(top[0].display_name, "Anfitrion");
+  assert.equal(top[0].confirmed, 3);
+  assert.equal((await q("select count(*)::int n from public.wallet_ledger where user_id = $1 and reason like 'referral_milestone:%'", [anfitrion]))[0].n, 1);
+});
+
+const jugador = await nuevoUsuario("Jugador");
+await test("retos diarios: estado, cobro único por día, validación en servidor y bono por completar todo", async () => {
+  const estado = async () => (await como(jugador, "select public.daily_challenges_status() s"))[0].s;
+  const e0 = await estado();
+  assert.deepEqual(e0.map((c) => c.id), ["checkin", "conectar", "publicar", "mensaje", "reflexion", "invitar", "completo"]);
+  assert.equal(e0.find((c) => c.id === "reflexion").done, true);
+  assert.equal(e0.find((c) => c.id === "checkin").done, false);
+  await falla(como(jugador, "select public.claim_daily_challenge('checkin')"), /aún no está cumplido/);
+  await falla(como(jugador, "select public.claim_daily_challenge('completo')"), /aún no está cumplido/);
+  await falla(como(jugador, "select public.claim_daily_challenge('inventado')"), /inexistente/);
+  const antes = await monedas(jugador);
+  assert.equal((await como(jugador, "select public.claim_daily_challenge('reflexion') p"))[0].p, 5);
+  await falla(como(jugador, "select public.claim_daily_challenge('reflexion')"), /duplicate|unique/);
+  assert.equal(await monedas(jugador), antes + 5);
+  await como(jugador, "select public.daily_checkin()");
+  assert.equal((await como(jugador, "select public.claim_daily_challenge('checkin') p"))[0].p, 5);
+  for (const c of ["conectar", "publicar", "mensaje"]) await q("insert into public.daily_challenge_claims (user_id, challenge_id) values ($1, $2)", [jugador, c]);
+  assert.equal((await estado()).find((c) => c.id === "completo").done, true);
+  assert.equal((await como(jugador, "select public.claim_daily_challenge('completo') p"))[0].p, 25);
+  assert.equal((await estado()).filter((c) => c.claimed).length, 6, "los 5 retos base + el bono de día completo");
+  assert.equal((await como(dora, "select count(*)::int n from public.daily_challenge_claims"))[0].n, 0, "los cobros son privados");
+  await falla(como(jugador, "insert into public.daily_challenge_claims (user_id, challenge_id) values ($1, 'invitar')", [jugador]), /permission denied/);
+});
+await test("retos: 'conectar' y 'mensaje' se comprueban con actividad real de hoy", async () => {
+  const rival = await nuevoUsuario("Rival");
+  const hecho = async (id) => (await como(rival, "select public.daily_challenges_status() s"))[0].s.find((c) => c.id === id).done;
+  assert.equal(await hecho("conectar"), false);
+  for (const t of [yo3, afin, lejano]) await q("insert into public.person_swipes (from_user, to_user, action) values ($1, $2, 'like') on conflict do nothing", [rival, t]);
+  assert.equal(await hecho("conectar"), true);
+  assert.equal(await hecho("publicar"), false);
+  await como(rival, "insert into public.posts (author_id, kind, body) values ($1, 'historia', 'Hola comunidad')", [rival]);
+  assert.equal(await hecho("publicar"), true);
+});
+await test("community_stats: pública, con cifras reales (sin contar perfiles demo)", async () => {
+  const s = (await como(null, "select public.community_stats() s"))[0].s;
+  assert.deepEqual(Object.keys(s).sort(), ["invites_ok", "matches_7d", "members", "new_7d"]);
+  const reales = (await q("select count(*)::int n from public.profiles where onboarding_completed and not is_demo"))[0].n;
+  assert.equal(s.members, reales);
+  assert.equal(s.invites_ok, 3);
+  const o = (await como(yo3, "select public.opportunity_snapshot() s"))[0].s;
+  assert.deepEqual(Object.keys(o).sort(), ["likes_pending", "new_people_7d"]);
+});
+await test("MIGRACIÓN: update_003 sobre una base con 002 (dos veces) rellena códigos, conserva datos y no toca los perfiles previos", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-003-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-003-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 003 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_003_conexion_viral.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_003 difieren");
+  await server.createDatabase("migracion3");
+  const m = new pg.Client({ ...conn, database: "migracion3" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini));
+    await m.query("insert into auth.users (id, email) values (gen_random_uuid(), 'previo1@test.dev'), (gen_random_uuid(), 'previo2@test.dev')");
+    await m.query("update public.profiles set onboarding_completed = true where id = (select id from auth.users where email = 'previo1@test.dev')");
+    await m.query(actualizacion);
+    await m.query(actualizacion);
+    await m.query("insert into auth.users (id, email) values (gen_random_uuid(), 'posterior@test.dev')");
+    const filas = (await m.query("select referral_code, onboarding_completed from public.profiles p join auth.users u on u.id = p.id order by u.email")).rows;
+    assert.equal(filas.length, 3);
+    assert.equal(new Set(filas.map((f) => f.referral_code)).size, 3, "códigos únicos");
+    assert.ok(filas.every((f) => /^[0-9a-f]{10}$/.test(f.referral_code)));
+    assert.deepEqual(filas.map((f) => f.onboarding_completed), [ "posterior", "previo1", "previo2" ].map((n) => n === "previo1"));
+    const fns = (await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in ('recommend_people','apply_referral','referral_stats','claim_daily_challenge','daily_challenges_status','community_stats','opportunity_snapshot','referral_leaderboard')")).rows[0].n;
+    assert.equal(fns, 8);
   } finally {
     await m.end();
   }

@@ -8,6 +8,8 @@ import { POR_ID, PRINCIPALES } from "@/lib/marca";
 import AnuncioCard from "@/components/AnuncioCard";
 import SearchBar from "@/components/SearchBar";
 import SeccionQueEs from "@/components/SeccionQueEs";
+import PanelHoy from "@/components/PanelHoy";
+import PruebaSocial from "@/components/PruebaSocial";
 import { formatearCuentaAtras, useCuentaAtras } from "@/components/FomoBadges";
 
 export default function Home() {
@@ -30,7 +32,10 @@ export default function Home() {
   ];
   const secundarias = [
     { ...POR_ID.busco, texto: "Publica tu presupuesto", chip: `${buscando} búsquedas` },
+    { ...POR_ID.explorar, texto: "Personas afines, con filtros", chip: "Motor de afinidad" },
     { ...POR_ID.citas, texto: "Pareja, amistad o roomies", chip: "Match astral" },
+    { ...POR_ID.retos, texto: "Gana monedas cada día", chip: "Retos diarios" },
+    { ...POR_ID.invitar, texto: "Tu círculo de 20", chip: "Sube de rango" },
     { ...POR_ID.astrologia, texto: "Carta del día", chip: estado.tarotDia ? "Carta lista" : "¡Saca tu carta!" },
     { ...POR_ID.mensajes, texto: "Negocia y conversa", chip: noLeidosTotal > 0 ? `${noLeidosTotal} sin leer` : "Al día" },
     { ...POR_ID.recompensas, texto: "Ruleta, misiones y canjes", chip: `💰 ${estado.monedas}` },
@@ -81,13 +86,17 @@ export default function Home() {
             </div>
           )}
 
-          <p className="mt-8 text-sm font-medium text-slate-500">
+          <PruebaSocial className="mt-6" />
+
+          <p className="mt-4 text-sm font-medium text-slate-500">
             Trato directo <span aria-hidden className="mx-2 text-brand-400">·</span> Perfiles verificados <span aria-hidden className="mx-2 text-brand-400">·</span> Hiperlocal
           </p>
         </div>
       </section>
 
-      <section className="mx-auto max-w-6xl px-4" aria-labelledby="explora">
+      <PanelHoy />
+
+      <section className="mx-auto mt-12 max-w-6xl px-4" aria-labelledby="explora">
         <h2 id="explora" className="mb-4 text-2xl font-black text-ink sm:text-3xl">
           Explora tu ciudad <span className="texto-marca">a un toque</span>
         </h2>
@@ -114,7 +123,7 @@ export default function Home() {
           ))}
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5">
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
           {secundarias.map((m, i) => (
             <motion.div key={m.id} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ delay: 0.05 * i }}>
               <Link href={m.href} className="tarjeta-viva flex h-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3">

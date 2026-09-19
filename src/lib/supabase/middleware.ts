@@ -11,6 +11,8 @@ const PROTEGIDAS = [
   "/perfil",
   "/verificacion",
   "/recompensas",
+  "/retos",
+  "/invitar",
   "/astrologia",
   "/empleos/publicar",
   "/admin",

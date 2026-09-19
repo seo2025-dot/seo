@@ -25,6 +25,10 @@ export interface PerfilFila {
   response_rate: number;
   trust_score: number;
   onboarding_completed?: boolean; 
+  university?: string | null;
+  school?: string | null;
+  height_cm?: number | null;
+  referral_code?: string;
   is_demo?: boolean;
   created_at: string;
 }

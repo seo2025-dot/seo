@@ -47,7 +47,7 @@ export const IMAGEN_VACIA =
   );
 
 // ── Perfiles ────────────────────────────────────────────────────────────────
-export function mapearPerfil(p: PerfilFila, yo: string | null, nacimiento?: string | null): Usuario {
+export function mapearPerfil(p: PerfilFila, yo: string | null, privado?: { nacimiento?: string | null; parejaIdeal?: string | null }): Usuario {
   const prof = p.professional;
   return {
     id: aIdApp(p.id, yo),
@@ -69,7 +69,12 @@ export function mapearPerfil(p: PerfilFila, yo: string | null, nacimiento?: stri
     onboardingCompleto: p.onboarding_completed,
     demo: p.is_demo,
     signo: (p.sign as Signo | null) ?? undefined,
-    nacimiento: nacimiento ?? undefined,
+    nacimiento: privado?.nacimiento ?? undefined,
+    parejaIdeal: privado?.parejaIdeal ?? undefined,
+    universidad: p.university ?? undefined,
+    colegio: p.school ?? undefined,
+    estatura: p.height_cm ?? undefined,
+    codigoReferido: p.referral_code,
     edad: p.age ?? undefined,
     relaciones: p.relations as TipoRelacion[],
     estilo: p.lifestyle,

@@ -9,6 +9,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { PROPIEDADES } from "./propiedades";
+import { avatarDemo } from "./retratos";
 import { DEMANDAS_INICIALES, GIGS, NEGOCIOS, VACANTES, VEHICULOS } from "./mercado";
 import { USUARIOS } from "./usuarios";
 import { crearPostsIniciales } from "./posts";
@@ -49,7 +50,8 @@ for (const u of USUARIOS) {
   w(`  age = ${lit(u.edad)}, sign = ${lit(u.signo)}, professional = ${prof}, badges = ${arr(u.badges)},`);
   w(`  identity_verified = ${u.verificaciones.identidad}, phone_verified = ${u.verificaciones.telefono}, email_verified = ${u.verificaciones.email},`);
   w(`  kyc_status = ${lit(u.verificaciones.identidad ? "verified" : "none")}, rating = ${u.rating}, reviews_count = ${u.resenas}, response_rate = ${u.respuesta},`);
-  w(`  is_demo = true, created_at = make_timestamptz(${u.miembroDesde}, 3, 1, 0, 0, 0)`);
+  const avatar = avatarDemo(u.id);
+  w(`  ${avatar ? `avatar_url = ${lit(avatar)}, ` : ""}is_demo = true, created_at = make_timestamptz(${u.miembroDesde}, 3, 1, 0, 0, 0)`);
   w(`where id = '${uid(u.id)}';`);
 }
 w();

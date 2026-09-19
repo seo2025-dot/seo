@@ -7,6 +7,10 @@ export interface Borrador {
   usuario: string;
   nacimiento: string; // YYYY-MM-DD
   ubicacion: string;
+  universidad: string;
+  colegio: string;
+  estatura: string; // cm, opcional (texto del input)
+  parejaIdeal: string;
   intereses: Interes[];
   zonas: string[];
   relaciones: TipoRelacion[];
@@ -20,6 +24,10 @@ export const BORRADOR_VACIO: Borrador = {
   usuario: "",
   nacimiento: "",
   ubicacion: "",
+  universidad: "",
+  colegio: "",
+  estatura: "",
+  parejaIdeal: "",
   intereses: [],
   zonas: [],
   relaciones: [],
@@ -67,6 +75,30 @@ export function validarBasico(b: Borrador, hoy = new Date()): Errores {
   else if (edad === null) e.nacimiento = "La fecha de nacimiento no es válida.";
   else if (edad < 18) e.nacimiento = "Debes tener 18 años o más para usar la plataforma.";
   else if (edad > 100) e.nacimiento = "La fecha de nacimiento no es válida.";
+  if (b.universidad.trim().length < 2) e.universidad = "Indica la universidad a la que asististe (o la más reciente).";
+  else if (b.universidad.trim().length > 120) e.universidad = "El nombre es demasiado largo (máx. 120).";
+  if (b.colegio.trim().length < 2) e.colegio = "Indica el colegio al que asististe.";
+  else if (b.colegio.trim().length > 120) e.colegio = "El nombre es demasiado largo (máx. 120).";
+  if (b.estatura.trim() !== "" && estaturaCm(b.estatura) === null) e.estatura = "Escribe tu estatura en centímetros (entre 120 y 230).";
+  return e;
+}
+
+/** Estatura en cm desde el texto del input; null si está vacía o fuera de rango (el servidor exige 120–230). */
+export function estaturaCm(texto: string): number | null {
+  const n = Number(texto.trim().replace(",", "."));
+  if (!Number.isFinite(n) || texto.trim() === "") return null;
+  const cm = n > 0 && n < 3 ? Math.round(n * 100) : Math.round(n); // admite «1,75» (metros)
+  return cm >= 120 && cm <= 230 ? cm : null;
+}
+
+export const MIN_PAREJA_IDEAL = 20; // el servidor exige el mismo mínimo en complete_onboarding()
+export const MAX_PAREJA_IDEAL = 1000;
+
+export function validarPareja(b: Borrador): Errores {
+  const e: Errores = {};
+  const largo = b.parejaIdeal.trim().length;
+  if (largo < MIN_PAREJA_IDEAL) e.parejaIdeal = `Cuéntanos un poco más (mínimo ${MIN_PAREJA_IDEAL} caracteres): así podremos recomendarte mejor.`;
+  else if (largo > MAX_PAREJA_IDEAL) e.parejaIdeal = `Máximo ${MAX_PAREJA_IDEAL} caracteres.`;
   return e;
 }
 
@@ -91,6 +123,7 @@ export function validarBio(b: Borrador): Errores {
 export const PASOS = [
   { id: "basico", titulo: "Sobre ti", validar: validarBasico },
   { id: "intereses", titulo: "Intereses", validar: validarIntereses },
+  { id: "pareja", titulo: "Tu pareja ideal", validar: validarPareja },
   { id: "fotos", titulo: "Fotos", validar: validarFotos },
   { id: "confirmar", titulo: "Confirmar", validar: validarBio },
 ] as const;

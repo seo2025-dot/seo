@@ -32,7 +32,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
 2. Pega **todo** `supabase/schema.sql` y pulsa **Run** (tablas, funciones, RLS, buckets de Storage y Realtime).
    > **¿Ya aplicaste una versión anterior de `schema.sql`?** No lo repitas entero: ejecuta solo `supabase/update_002_fotos_onboarding.sql` (fotos de perfil, onboarding y simulador; es idempotente y marca como «onboarding completo» a los perfiles que ya existían).
 3. *(Opcional, recomendado para probar)* pega y ejecuta `supabase/seed.sql`: crea 23 perfiles demo, ofertas, búsquedas, servicios, vacantes y publicaciones. Los perfiles demo **no pueden iniciar sesión** y aceptan algunos likes en Citas para poder probar con una sola cuenta.
-4. *(Opcional)* ejecuta `supabase/seed_personas.sql`: **3 personas simuladas completas con 10 fotos cada una** (ver [Persona Engine](#persona-engine-simulación-de-personas)).
+   > **¿Tu base ya tenía la 002?** Ejecuta además `supabase/update_003_conexion_viral.sql` (perfil académico, recomendaciones, referidos y retos diarios; idempotente).
+4. *(Opcional)* ejecuta `supabase/seed_personas.sql`: **5 personas de demostración de Ecuador** (Cuenca, Quito y Guayaquil) con retrato y escenas de su ciudad; requiere haber aplicado también `update_003_conexion_viral.sql` (ver [Persona Engine](#persona-engine-simulación-de-personas)).
 5. Hazte administrador (para revisar KYC y usar el Persona Engine), sustituyendo tu correo tras registrarte:
    ```sql
    insert into public.app_admins (user_id) select id from auth.users where email = 'tu@correo.com';
@@ -58,6 +59,7 @@ Tres capas con responsabilidades separadas: **cliente** (pantallas y `features/`
 supabase/                              ── BASE DE DATOS
 ├── schema.sql                         Esquema completo (incluye la actualización 002)
 ├── update_002_fotos_onboarding.sql    Solo lo nuevo: fotos, onboarding, simulador (para bases ya creadas)
+├── update_003_conexion_viral.sql      Perfil académico, recomendaciones, referidos, retos diarios, métricas
 ├── seed.sql / seed_personas.sql       Datos de demostración (generados)
 ├── seed/                              Datos en TypeScript + generadores (generate.ts, personas.ts = Persona Engine)
 └── tests/                             Pruebas: db.test.mjs, media.test.mjs, ui-logica.test.mjs
@@ -92,11 +94,24 @@ src/
 - **Interfaz**: seleccionar (varias a la vez o arrastrando), previsualizar, **reordenar arrastrando o con los botones ← →**, eliminar y elegir principal *antes de confirmar*; los cambios se aplican al pulsar «Guardar» (borra → sube una a una con progreso → reordena).
 
 ### Onboarding
-Tras registrarse, `GuardaOnboarding` lleva a `/onboarding` (solo si `profiles.onboarding_completed` es `false`): **Sobre ti → Intereses → Fotos → Confirmar**. Cada paso se valida en el cliente y `complete_onboarding()` lo **vuelve a validar en el servidor** (nombre, usuario, fecha de nacimiento ≥ 18 años, al menos 1 foto). El indicador no es escribible directamente por el cliente.
+Tras registrarse, `GuardaOnboarding` lleva a `/onboarding` (solo si `profiles.onboarding_completed` es `false`): **Sobre ti (con universidad y colegio) → Intereses → Tu pareja ideal → Fotos → Confirmar**. Cada paso se valida en el cliente y `complete_onboarding()` lo **vuelve a validar en el servidor** (nombre, usuario, fecha de nacimiento ≥ 18 años, universidad, colegio, descripción de la pareja ideal y al menos 1 foto). El indicador no es escribible directamente por el cliente.
+
+### Conexión: perfil académico, recomendaciones, referidos y retos (actualización 003)
+Todo vive en `supabase/update_003_conexion_viral.sql` (idempotente; ya incluido al final de `schema.sql`).
+
+- **Perfil ampliado**: `profiles.university`, `school`, `height_cm` (públicos) y `user_private.ideal_partner` (descripción libre de la pareja ideal, **privada**: solo su dueño la lee; el motor la usa dentro de funciones `SECURITY DEFINER` y jamás la devuelve). El onboarding tiene un paso nuevo, **«Tu pareja ideal»**, y `complete_onboarding()` exige universidad, colegio y ≥ 20 caracteres de pareja ideal (los perfiles anteriores no se bloquean; pueden completarlo en su perfil).
+- **Motor de recomendación** (`recommend_people()` → `/explorar`): puntúa 0–100 y explica los motivos. 40 pts «lo que describes como pareja ideal ↔ cómo se describe cada perfil» (lexemas del diccionario español de PostgreSQL, sin acentos ni palabras vacías), 15 pts de **reciprocidad** (lo que ella/él busca ↔ cómo te describes tú) y hasta 45 pts por universidad y colegio compartidos, intereses, estilo de vida, zona, tipo de relación y afinidad astral. Filtra por **rango de edad y de estatura**, oculta a quien descartaste y pagina. *Siguiente paso natural*: embeddings con `pgvector` para captar sinónimos y matices.
+- **Galería** `/explorar`: tarjetas grandes con anillo de compatibilidad, motivos, formación y botón «Conectar» (reutiliza `swipe_person`, con match automático si es mutuo).
+- **Bienvenida y saludo**: al terminar el registro, un modal con el nombre de la persona y sus tres primeros pasos (una sola vez); al volver a iniciar sesión, un saludo cálido con su nombre (una vez por sesión). Ver `src/lib/mensajes.ts`.
+- **«Hoy depende de ti»** (portada): panel con lo que de verdad está pendiente (likes sin responder, mensajes, personas nuevas, racha, monedas por cobrar y cuenta atrás real hasta el reinicio de los retos, medianoche UTC). Tono motivador y estoico; **todas las cifras son reales** (`opportunity_snapshot()`, `community_stats()`) y no se muestra nada si no hay nada pendiente o la cifra es demasiado pequeña.
+- **Referidos** (`/invitar`): enlace personal `/registro?ref=CÓDIGO`. Cada invitado que **completa su perfil** suma +50 monedas al invitador y +25 al invitado (una sola vez, anti-abuso); bonos de hito a los 3 (+50), 5 (+100), 10 (+250) y 20 (+600) y rangos de estatus **Semilla → Puente → Conector → Embajador → Mentor → Faro** con meta de un círculo de 20. Incluye ranking. El código se captura desde cualquier página de entrada (`CapturaReferido`) y se aplica con `apply_referral()` (sirve también con OAuth). Las monedas son virtuales y sin valor monetario.
+- **Retos diarios** (`/retos`): bono diario, conectar con 3 personas, publicar, iniciar conversación, reflexión del día, traer a alguien y bono «día completo». El servidor comprueba el cumplimiento con actividad real y paga una sola vez por reto y día (`claim_daily_challenge()`). Los premios están duplicados en `src/lib/retos.ts` y hay un test de paridad.
+- **Reflexiones** (`src/lib/reflexiones.ts`): mensajes de autoconocimiento y progreso inspirados en la filosofía espiritista de Allan Kardec. Solo se marcan como cita las frases conocidas de su obra; el resto se presenta como «inspirada en», sin atribuirle palabras.
 
 ### Persona Engine (simulación de personas)
-- `supabase/seed_personas.sql` crea **3 personas completas** (Valentina Cruz, Mateo Salinas, Lucía Andrade): usuario, perfil con onboarding completo, fecha de nacimiento y **10 fotos cada una** (URLs deterministas de picsum.photos). Son perfiles demo (`is_demo`): no pueden iniciar sesión.
-- Generar más (carga/rendimiento): `npx tsx supabase/seed/personas.ts --count 200 --out supabase/seed_personas_200.sql` (200 personas = 2 000 fotos).
+- `supabase/seed_personas.sql` crea **5 personas completas de Ecuador**: Emilia Vintimilla (Cuenca, restauradora y ceramista), Mariana Larrea (Quito, fundadora de café de especialidad), Génesis Villamar (Guayaquil · Puerto Santa Ana, coach de liderazgo), Sebastián Astudillo (Cuenca · Turi, violinista) y Andrés Terán (Quito · Cumbayá, ingeniero civil). Cada una trae biografía, universidad, colegio, estatura, profesión, **pareja ideal** (privada) y una galería de 5–6 fotos: el retrato (foto 0 = avatar, de pravatar.cc) y escenas reales de su ciudad (Wikimedia Commons, licencias libres; los créditos están en la cabecera del SQL y en `supabase/seed/escenas_ecuador.ts`). Todas las URLs son públicas y se verificaron con HTTP 200. Comparten universidad o colegio entre sí a propósito (Emilia y Sebastián; Mariana y Andrés) para que el motor de recomendación tenga con qué trabajar.
+- El script es **idempotente y atómico** (una transacción): reemplaza la galería completa de cada persona (por eso re-ejecutarlo sustituye las fotos del seed anterior) y no pisa el `@usuario` si una persona real ya lo tiene. Son perfiles demo (`is_demo`): no pueden iniciar sesión y la galería `/explorar` los marca como «Perfil demo».
+- Generar más (carga/rendimiento): `npx tsx supabase/seed/personas.ts --count 200 --out supabase/seed_personas_200.sql` (las personas 6 en adelante son relleno para pruebas de carga con 10 fotos de picsum.photos cada una).
 - **`/admin/personas`** (solo administradores): lista las personas con su galería y estadísticas, y permite que **interactúen contigo** (like, superlike, descartar, solicitud de amistad, mensaje) mediante la RPC `admin_simulate`, que la base de datos restringe a administradores y a perfiles demo. Sirve para probar matches, notificaciones y chat con una sola cuenta real.
 
 ### Modelo de datos
@@ -111,6 +126,7 @@ Tras registrarse, `GuardaOnboarding` lleva a `/onboarding` (solo si `profiles.on
 | `chats`, `chat_members`, `messages` | Mensajería (texto, ofertas, cotizaciones, sistema) |
 | `notifications`, `posts`, `post_likes`, `post_comments`, `reviews` | Avisos, comunidad y reputación |
 | `wallets`, `wallet_ledger`, `missions_claimed`, `tarot_draws` | Monedas y tarot (solo mutables vía RPC) |
+| `referrals`, `daily_challenge_claims` | Red de invitaciones y cobros de retos diarios (solo lectura propia; se escriben vía RPC) |
 | `kyc_submissions`, `app_admins` | Verificación de identidad |
 
 ### Seguridad
@@ -125,6 +141,11 @@ Al insertar o modificar un anuncio, un trigger ejecuta `refresh_listing_matches(
 
 ### Tiempo real
 Mensajes, notificaciones, monedero, amistades y matches por `postgres_changes`; presencia ("en línea" y "N personas viendo esto") y "escribiendo…" por Presence/Broadcast.
+
+## Despliegue automatizado
+1. **App (Vercel)**: importa el repositorio en [vercel.com/new](https://vercel.com/new) (Next.js se detecta solo) y define `NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY`. Cada push a `main` despliega producción y cada pull request genera una vista previa. Añade la URL de producción a *Authentication → URL Configuration → Redirect URLs* de Supabase.
+2. **Integración continua** (`.github/workflows/ci.yml`): en cada push/PR ejecuta tipos, lint, `next build` y las pruebas (lógica de cliente, medios y base de datos con PostgreSQL real). Conviene exigir que pase antes de fusionar (*Settings → Branches → Require status checks*).
+3. **Base de datos**: aplica una vez `supabase/update_003_conexion_viral.sql` en el *SQL Editor* de Supabase, o automatízalo con el flujo manual **Aplicar actualización de base de datos** (`.github/workflows/db-migrate.yml`), que usa el secreto `SUPABASE_DB_URL` (entorno `production` para poder exigir aprobación). Aplica la base **antes** de desplegar la app: la app nueva llama a funciones que la 003 crea.
 
 ## Pruebas de la base de datos
 No tocan tu proyecto: levantan un PostgreSQL embebido, imitan `auth`/`storage` y aplican `schema.sql` + `seed.sql`.
@@ -143,7 +164,7 @@ Cubren RLS y privilegios por columna, el motor de coincidencias (incluido rendim
 - **Pagos**: aceptar una oferta o cotización solo registra el acuerdo; no se procesa ningún pago.
 - **Escala**: la app carga hasta 500 anuncios, 300 servicios y 100 publicaciones al arrancar; para más volumen hay que paginar en servidor.
 - **Oferta relámpago del seed** dura hasta el fin del día del seeding.
-- **Fotos**: no hay moderación de contenido (NSFW) ni límite de frecuencia de subidas; añádelos (p. ej. un servicio de moderación y rate limiting en `/api/photos`) antes de abrir el registro al público. Las 3 personas del seed usan imágenes externas (picsum.photos), no pasan por el pipeline de subida.
+- **Fotos**: no hay moderación de contenido (NSFW) ni límite de frecuencia de subidas; añádelos (p. ej. un servicio de moderación y rate limiting en `/api/photos`) antes de abrir el registro al público. Las personas del seed usan imágenes externas (pravatar.cc, Wikimedia Commons y, en el relleno, picsum.photos) y no pasan por el pipeline de subida; los retratos son fotos de muestra de otras personas, por eso los perfiles se marcan como demo. No los ejecutes en producción con usuarios reales sin dejarlo claro, y sustitúyelos por fotos propias o con licencia antes de un lanzamiento público.
 - **S3 propio**: el bucket de Supabase Storage ya es compatible con S3; un bucket S3/R2 directo requiere un driver nuevo (interfaz `Almacenamiento`).
 - **API**: se usa la API REST/RPC de Supabase (PostgREST); no hay GraphQL (puede activarse con `pg_graphql`).
 - Astrología y tarot son entretenimiento.

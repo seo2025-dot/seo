@@ -70,6 +70,12 @@ export interface Usuario {
   edad?: number;
   relaciones?: TipoRelacion[];
   estilo?: string[]; // estilo de vida
+  // — Perfil de conexión —
+  universidad?: string;
+  colegio?: string;
+  estatura?: number; // cm
+  parejaIdeal?: string; // privada: solo la ve su dueño (la usa el motor de recomendación en el servidor)
+  codigoReferido?: string;
   // — Freelance —
   profesional?: Profesional;
 }

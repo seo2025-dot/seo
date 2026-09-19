@@ -109,6 +109,7 @@ interface Crudo {
   // Privados (solo con sesión)
   monedero: MonederoFila | null;
   nacimiento: string | null;
+  parejaIdeal: string | null;
   swipesListing: { listing_id: string; action: "save" | "pass" }[];
   swipesPersona: { to_user: string }[];
   matches: { user_a: string; user_b: string }[];
@@ -122,9 +123,10 @@ interface Crudo {
   esAdmin: boolean;
 }
 
-const PRIVADO_VACIO: Pick<Crudo, "monedero" | "nacimiento" | "swipesListing" | "swipesPersona" | "matches" | "amistades" | "notificaciones" | "tarot" | "misiones" | "aplicaciones" | "chats" | "mensajes" | "esAdmin"> = {
+const PRIVADO_VACIO: Pick<Crudo, "monedero" | "nacimiento" | "parejaIdeal" | "swipesListing" | "swipesPersona" | "matches" | "amistades" | "notificaciones" | "tarot" | "misiones" | "aplicaciones" | "chats" | "mensajes" | "esAdmin"> = {
   monedero: null,
   nacimiento: null,
+  parejaIdeal: null,
   swipesListing: [],
   swipesPersona: [],
   matches: [],
@@ -251,6 +253,8 @@ interface SocialContextValue {
   completarOnboarding: () => Promise<boolean>;
   /** Vuelve a leer tu perfil (p. ej. tras cambiar tus fotos, que actualizan el avatar en el servidor). */
   refrescarPerfil: () => Promise<void>;
+  /** Vuelve a leer el saldo de monedas (p. ej. tras cobrar un reto diario, que paga el servidor). */
+  refrescarMonedero: () => Promise<void>;
 }
 
 const SocialContext = createContext<SocialContextValue | null>(null);
@@ -418,11 +422,13 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     if (!id) return;
     const [p, priv] = await Promise.all([
       supabase().from("profiles").select("*").eq("id", id).maybeSingle(),
-      supabase().from("user_private").select("birth_date").eq("user_id", id).maybeSingle(),
+      supabase().from("user_private").select("birth_date, ideal_partner").eq("user_id", id).maybeSingle(),
     ]);
+    const privado = priv.data as { birth_date: string | null; ideal_partner: string | null } | null;
     parche((prev) => ({
       perfiles: p.data ? upsertId(prev.perfiles, p.data as PerfilFila) : prev.perfiles,
-      nacimiento: (priv.data as { birth_date: string | null } | null)?.birth_date ?? prev.nacimiento,
+      nacimiento: privado?.birth_date ?? prev.nacimiento,
+      parejaIdeal: privado?.ideal_partner ?? prev.parejaIdeal,
     }));
   }, [parche]);
 
@@ -430,7 +436,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     const sb = supabase();
     const [monedero, priv, swL, swP, mt, am, no, ta, mi, ap, ch, adm] = await Promise.all([
       sb.from("wallets").select("*").eq("user_id", id).maybeSingle(),
-      sb.from("user_private").select("birth_date").eq("user_id", id).maybeSingle(),
+      sb.from("user_private").select("birth_date, ideal_partner").eq("user_id", id).maybeSingle(),
       sb.from("listing_swipes").select("listing_id, action").eq("user_id", id),
       sb.from("person_swipes").select("to_user").eq("from_user", id),
       sb.from("matches").select("user_a, user_b"),
@@ -444,7 +450,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     ]);
     parche((prev) => ({
       monedero: (monedero.data as MonederoFila | null) ?? null,
-      nacimiento: (priv.data as { birth_date: string | null } | null)?.birth_date ?? null,
+      nacimiento: (priv.data as { birth_date: string | null; ideal_partner: string | null } | null)?.birth_date ?? null,
+      parejaIdeal: (priv.data as { birth_date: string | null; ideal_partner: string | null } | null)?.ideal_partner ?? null,
       swipesListing: (swL.data ?? []) as Crudo["swipesListing"],
       swipesPersona: (swP.data ?? []) as Crudo["swipesPersona"],
       matches: (mt.data ?? []) as Crudo["matches"],
@@ -609,8 +616,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
 
   const perfilesMapeados = useMemo(() => {
     const yo = uid;
-    return crudo.perfiles.map((p) => mapearPerfil(p, yo, p.id === yo ? crudo.nacimiento : null));
-  }, [crudo.perfiles, crudo.nacimiento, uid]);
+    return crudo.perfiles.map((p) => mapearPerfil(p, yo, p.id === yo ? { nacimiento: crudo.nacimiento, parejaIdeal: crudo.parejaIdeal } : undefined));
+  }, [crudo.perfiles, crudo.nacimiento, crudo.parejaIdeal, uid]);
 
   const yoUsuario = useMemo(() => perfilesMapeados.find((p) => p.id === "yo") ?? PERFIL_INVITADO, [perfilesMapeados]);
   const usuarios = useMemo(() => perfilesMapeados.filter((p) => p.id !== "yo"), [perfilesMapeados]);
@@ -1134,6 +1141,9 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
         if (c.zonas !== undefined) cols.zones = c.zonas;
         if (c.relaciones !== undefined) cols.relations = c.relaciones;
         if (c.estilo !== undefined) cols.lifestyle = c.estilo;
+        if ("universidad" in c) cols.university = c.universidad?.trim() || null;
+        if ("colegio" in c) cols.school = c.colegio?.trim() || null;
+        if ("estatura" in c) cols.height_cm = c.estatura ?? null;
         if ("presupuesto" in c) cols.budget = c.presupuesto ?? null;
         if ("edad" in c) cols.age = c.edad ?? null;
         if (c.signo !== undefined) cols.sign = c.signo;
@@ -1152,6 +1162,12 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
           const { error } = await supabase().from("user_private").update({ birth_date: c.nacimiento || null }).eq("user_id", yo);
           if (error) throw error;
           parche(() => ({ nacimiento: c.nacimiento || null }));
+        }
+        if (c.parejaIdeal !== undefined) {
+          const texto = c.parejaIdeal.trim();
+          const { error } = await supabase().from("user_private").update({ ideal_partner: texto || null }).eq("user_id", yo);
+          if (error) throw error;
+          parche(() => ({ parejaIdeal: texto || null }));
         }
         return true;
       });
@@ -1419,6 +1435,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       reiniciar,
       completarOnboarding,
       refrescarPerfil: recargarPerfilPropio,
+      refrescarMonedero: recargarMonedero,
     };
   }, [
     estado, sesion, crudo.esAdmin, crudo.chats, crudo.notificaciones, hidratado, privadoListo, errorDatos, escribiendo, usuarios, todasPropiedades, anunciosMapeados, anuncios, trabajos,
@@ -1428,7 +1445,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     enviarMensaje, hacerOferta, enviarCotizacion, responderOferta, leer, contratarServicio, postularVacante, publicarServicio, publicarVacante,
     editarPerfil, publicarPost, eliminarPost, alternarLikePost, comentarPost, leerNotificaciones, checkin, girarRuleta, canjearBoost,
     canjearSuperLikes, canjearTirada, reclamarMision, sacarCartaDelDia, hacerTiradaPremium, enviarKyc, reiniciar,
-    completarOnboarding, recargarPerfilPropio,
+    completarOnboarding, recargarPerfilPropio, recargarMonedero,
   ]);
 
   return (

@@ -1,0 +1,29 @@
+name: Aplicar actualización de base de datos
+
+# Ejecución MANUAL (Actions > Aplicar actualización de base de datos > Run workflow).
+# Las actualizaciones son idempotentes, así que repetirlas es seguro.
+# Requiere el secreto SUPABASE_DB_URL (Supabase > Project Settings > Database > Connection string, modo "Session pooler" o directo).
+on:
+  workflow_dispatch:
+    inputs:
+      archivo:
+        description: Actualización a aplicar
+        required: true
+        default: supabase/update_003_conexion_viral.sql
+        type: choice
+        options:
+          - supabase/update_002_fotos_onboarding.sql
+          - supabase/update_003_conexion_viral.sql
+
+jobs:
+  migrar:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aplicar SQL
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          test -n "$SUPABASE_DB_URL" || { echo "Falta el secreto SUPABASE_DB_URL"; exit 1; }
+          psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 -f "${{ inputs.archivo }}"

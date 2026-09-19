@@ -15,6 +15,7 @@ import Avatar from "@/components/Avatar";
 import AnuncioCard from "@/components/AnuncioCard";
 import PostCard from "@/components/PostCard";
 import SeccionFotos from "@/features/fotos/SeccionFotos";
+import { estaturaCm, MAX_PAREJA_IDEAL, MIN_PAREJA_IDEAL } from "@/features/onboarding/validacion";
 import {
   AstralBadge,
   BadgesFila,
@@ -160,6 +161,13 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
             · Miembro desde {usuario.miembroDesde}
             {!esPropio && <span className={enLinea(usuario.id) ? " text-emerald-600" : ""}> · {enLinea(usuario.id) ? "En línea" : "Desconectado"}</span>}
           </p>
+          {(usuario.universidad || usuario.colegio || usuario.estatura) && (
+            <p className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm text-slate-600">
+              {usuario.universidad && <span>🎓 {usuario.universidad}</span>}
+              {usuario.colegio && <span>🏫 {usuario.colegio}</span>}
+              {usuario.estatura && <span>📏 {usuario.estatura} cm</span>}
+            </p>
+          )}
           {usuario.profesional && <p className="mt-1 text-sm font-semibold text-brand-700">💼 {usuario.profesional.titular}</p>}
           <p className="mt-3 text-[15px] leading-relaxed text-slate-700">{usuario.bio}</p>
 
@@ -397,6 +405,10 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
   const [ubicacion, setUbicacion] = useState(yo.ubicacion);
   const [edad, setEdad] = useState(yo.edad ? String(yo.edad) : "");
   const [presupuesto, setPresupuesto] = useState(yo.presupuesto ?? "");
+  const [universidad, setUniversidad] = useState(yo.universidad ?? "");
+  const [colegio, setColegio] = useState(yo.colegio ?? "");
+  const [estatura, setEstatura] = useState(yo.estatura ? String(yo.estatura) : "");
+  const [parejaIdeal, setParejaIdeal] = useState(yo.parejaIdeal ?? "");
   const [intereses, setIntereses] = useState<Interes[]>(yo.intereses);
   const [zonas, setZonas] = useState<string[]>(yo.zonas);
   const [relaciones, setRelaciones] = useState<TipoRelacion[]>(yo.relaciones ?? []);
@@ -449,6 +461,14 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
       setError("El nombre de usuario debe tener al menos 2 caracteres (letras, números, _ o .).");
       return;
     }
+    if (estatura.trim() && estaturaCm(estatura) === null) {
+      setError("La estatura debe estar entre 120 y 230 cm.");
+      return;
+    }
+    if (parejaIdeal.trim() && parejaIdeal.trim().length < MIN_PAREJA_IDEAL) {
+      setError(`Describe a tu pareja ideal con al menos ${MIN_PAREJA_IDEAL} caracteres (o deja el campo vacío).`);
+      return;
+    }
     const listaSkills = skills.split(",").map((s) => s.trim()).filter(Boolean);
     setGuardando(true);
     const ok = await editarPerfil({
@@ -458,6 +478,10 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
       ubicacion: ubicacion.trim(),
       edad: edad ? edadN : undefined,
       presupuesto: presupuesto.trim() || undefined,
+      universidad: universidad.trim(),
+      colegio: colegio.trim(),
+      estatura: estaturaCm(estatura) ?? undefined,
+      parejaIdeal: parejaIdeal.trim(),
       intereses,
       zonas,
       relaciones,
@@ -506,6 +530,18 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
           <label htmlFor="pf-edad" className="mb-1 block text-sm font-medium">Edad (opcional, +18)</label>
           <input id="pf-edad" type="number" min="18" max="100" value={edad} onChange={(e) => setEdad(e.target.value)} className={campo} />
         </div>
+        <div>
+          <label htmlFor="pf-uni" className="mb-1 block text-sm font-medium">Universidad a la que asististe</label>
+          <input id="pf-uni" value={universidad} onChange={(e) => setUniversidad(e.target.value)} maxLength={120} className={campo} />
+        </div>
+        <div>
+          <label htmlFor="pf-col" className="mb-1 block text-sm font-medium">Colegio al que asististe</label>
+          <input id="pf-col" value={colegio} onChange={(e) => setColegio(e.target.value)} maxLength={120} className={campo} />
+        </div>
+        <div>
+          <label htmlFor="pf-est" className="mb-1 block text-sm font-medium">Estatura (cm)</label>
+          <input id="pf-est" inputMode="decimal" value={estatura} onChange={(e) => setEstatura(e.target.value)} maxLength={5} placeholder="170" className={campo} />
+        </div>
         <div className="sm:col-span-2">
           <label htmlFor="pf-presupuesto" className="mb-1 block text-sm font-medium">Presupuesto (opcional)</label>
           <input id="pf-presupuesto" value={presupuesto} onChange={(e) => setPresupuesto(e.target.value)} maxLength={40} placeholder="USD 400–600 / mes" className={campo} />
@@ -515,6 +551,11 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
       <div>
         <label htmlFor="pf-bio" className="mb-1 block text-sm font-medium">Sobre ti</label>
         <textarea id="pf-bio" value={bio} onChange={(e) => setBio(e.target.value)} rows={3} maxLength={240} className={campo} />
+      </div>
+
+      <div>
+        <label htmlFor="pf-pareja" className="mb-1 block text-sm font-medium">Tu pareja ideal <span className="font-normal text-slate-500">(privado: solo tú lo ves; alimenta tus recomendaciones)</span></label>
+        <textarea id="pf-pareja" value={parejaIdeal} onChange={(e) => setParejaIdeal(e.target.value)} rows={4} maxLength={MAX_PAREJA_IDEAL} className={campo} />
       </div>
 
       <fieldset>

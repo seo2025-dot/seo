@@ -5,6 +5,9 @@ import Navbar, { BottomNav } from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import AvisoDatos from "@/components/AvisoDatos";
 import GuardaOnboarding from "@/features/onboarding/GuardaOnboarding";
+import BienvenidaModal from "@/components/BienvenidaModal";
+import SaludoRecurrente from "@/components/SaludoRecurrente";
+import CapturaReferido from "@/components/CapturaReferido";
 import { SocialProvider } from "@/context/SocialContext";
 import { LEMA } from "@/lib/marca";
 
@@ -30,6 +33,9 @@ export default function RootLayout({
           <Navbar />
           <AvisoDatos />
           <GuardaOnboarding />
+          <CapturaReferido />
+          <BienvenidaModal />
+          <SaludoRecurrente />
           <main className="flex-1">{children}</main>
           <BottomNav />
         </SocialProvider>

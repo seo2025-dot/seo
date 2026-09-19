@@ -6,12 +6,15 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabaseClient";
 import BotonesOAuth from "@/components/auth/BotonesOAuth";
 import { campoCls } from "@/components/publicar/comunes";
+import PruebaSocial from "@/components/PruebaSocial";
+import { codigoValido } from "@/lib/referidos";
 
 const destinoSeguro = (next: string | null) => (next && next.startsWith("/") && !next.startsWith("//") ? next : "/perfil");
 
 function Formulario() {
   const params = useSearchParams();
   const destino = destinoSeguro(params.get("next"));
+  const codigoRef = codigoValido(params.get("ref")) ? params.get("ref")!.trim().toLowerCase() : null;
   const [nombre, setNombre] = useState("");
   const [email, setEmail] = useState("");
   const [clave, setClave] = useState("");
@@ -32,7 +35,7 @@ function Formulario() {
       email: email.trim(),
       password: clave,
       options: {
-        data: { full_name: nombre.trim() },
+        data: { full_name: nombre.trim(), ...(codigoRef ? { ref: codigoRef } : {}) },
         emailRedirectTo: `${window.location.origin}/auth/callback?next=${encodeURIComponent(destino)}`,
       },
     });
@@ -69,6 +72,12 @@ function Formulario() {
     <div className="mx-auto max-w-md px-4 py-12">
       <h1 className="text-3xl font-bold">Crear cuenta</h1>
       <p className="mt-1 text-slate-500">Únete a la comunidad: publica, conecta y gana recompensas.</p>
+      <PruebaSocial className="mt-3 justify-start text-xs" />
+      {codigoRef && (
+        <p className="mt-4 rounded-xl bg-brand-50 p-3 text-sm text-brand-900" role="status">
+          🌱 Llegas por invitación de alguien de la comunidad: al completar tu perfil recibirás monedas de bienvenida extra.
+        </p>
+      )}
 
       <div className="mt-8">
         <BotonesOAuth destino={destino} />
