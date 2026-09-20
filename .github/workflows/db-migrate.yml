@@ -9,11 +9,12 @@ on:
       archivo:
         description: Actualización a aplicar
         required: true
-        default: supabase/update_003_conexion_viral.sql
+        default: supabase/update_004_pareja_ideal.sql
         type: choice
         options:
           - supabase/update_002_fotos_onboarding.sql
           - supabase/update_003_conexion_viral.sql
+          - supabase/update_004_pareja_ideal.sql
 
 jobs:
   migrar:

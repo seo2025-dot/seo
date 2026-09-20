@@ -6,6 +6,9 @@ import { useSocial } from "@/context/SocialContext";
 import PruebaSocial from "@/components/PruebaSocial";
 import TarjetaAfinidad from "@/components/TarjetaAfinidad";
 import { FILTROS_VACIOS, useRecomendaciones, type FiltrosGaleria } from "@/features/conexion/hooks";
+import BarraCompletitud from "@/components/BarraCompletitud";
+import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
+import { completitudPerfil, datosCompletitud } from "@/lib/completitud";
 import { primerNombre } from "@/lib/mensajes";
 
 const EDAD = { min: 18, max: 70 };
@@ -66,6 +69,8 @@ export default function ExplorarPage() {
   const { estado, sesion, hidratado, usuarios, likePersona } = useSocial();
   const [filtros, setFiltros] = useState<FiltrosGaleria>(FILTROS_VACIOS);
   const [aviso, setAviso] = useState<{ texto: string; href?: string } | null>(null);
+  const { fotos } = useFotosPerfil(sesion.uid);
+  const completitud = useMemo(() => completitudPerfil(datosCompletitud(estado.yo, fotos.length)), [estado.yo, fotos.length]);
   const { items, cargando, hayMas, error, masResultados } = useRecomendaciones(filtros);
 
   const porId = useMemo(() => new Map(usuarios.map((u) => [u.id, u])), [usuarios]);
@@ -107,9 +112,10 @@ export default function ExplorarPage() {
         <PruebaSocial className="mt-3 justify-start" />
       </header>
 
-      {!estado.yo.parejaIdeal && (
+      {completitud.porcentaje < 100 && (
         <Link href="/perfil" className="mb-6 block rounded-2xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900 transition hover:bg-brand-100">
-          <strong>Mejora tus recomendaciones:</strong> describe a tu pareja ideal en tu perfil (es privado) y el motor buscará a quien mejor encaje. <span className="font-bold underline">Completar ahora</span>
+          <BarraCompletitud completitud={completitud} compacta className="mb-2" />
+          <strong>Mejora tus recomendaciones:</strong> {completitud.faltantes[0]?.ayuda.toLowerCase()} (lo que buscas es privado y afina tus porcentajes de afinidad). <span className="font-bold underline">Completar ahora</span>
         </Link>
       )}
 

@@ -28,6 +28,13 @@ export const COMODIDADES_SUGERIDAS = [
   "Terraza",
 ];
 
+/** Valores personales (los propios y los que se buscan en la pareja). Máximo MAX_VALORES por lista. */
+export const VALORES = [
+  "Familia", "Honestidad", "Respeto", "Lealtad", "Fe", "Ambición", "Aventura",
+  "Creatividad", "Sentido del humor", "Crecimiento personal", "Estabilidad", "Sostenibilidad",
+];
+export const MAX_VALORES = 5;
+
 export const ESTILOS_VIDA = [
   "Deportista", "Viajero", "Foodie", "Creativo", "Emprendedor", "Casero",
   "Nocturno", "Mascotas", "Espiritual", "Lector", "Gamer", "Familiar", "Amante de las plantas",

@@ -11,6 +11,9 @@ export interface Borrador {
   colegio: string;
   estatura: string; // cm, opcional (texto del input)
   parejaIdeal: string;
+  valores: string[]; // los valores propios (opcional)
+  parejaIdealValores: string[]; // valores que busca en su pareja (opcional)
+  parejaIdealEstilo: string[]; // estilo de vida que busca en su pareja (opcional)
   intereses: Interes[];
   zonas: string[];
   relaciones: TipoRelacion[];
@@ -28,6 +31,9 @@ export const BORRADOR_VACIO: Borrador = {
   colegio: "",
   estatura: "",
   parejaIdeal: "",
+  valores: [],
+  parejaIdealValores: [],
+  parejaIdealEstilo: [],
   intereses: [],
   zonas: [],
   relaciones: [],

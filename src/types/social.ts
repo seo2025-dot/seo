@@ -75,6 +75,9 @@ export interface Usuario {
   colegio?: string;
   estatura?: number; // cm
   parejaIdeal?: string; // privada: solo la ve su dueño (la usa el motor de recomendación en el servidor)
+  valores?: string[]; // los valores con los que se identifica (públicos)
+  parejaIdealValores?: string[]; // privado: valores que busca en su pareja
+  parejaIdealEstilo?: string[]; // privado: estilo de vida que busca en su pareja
   codigoReferido?: string;
   // — Freelance —
   profesional?: Profesional;

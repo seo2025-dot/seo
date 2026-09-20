@@ -1,20 +1,23 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { Interes, TipoRelacion } from "@/types/social";
-import { ESTILOS_VIDA } from "@/data/catalogos";
-import { ZONAS } from "@/data/catalogos";
+import { ESTILOS_VIDA, MAX_VALORES, VALORES, ZONAS } from "@/data/catalogos";
 import { useSocial } from "@/context/SocialContext";
 import { ETIQUETA_ELEMENTO, infoSigno } from "@/lib/astrologia";
 import { comprimirImagen } from "@/lib/imagen";
+import { completitudPerfil, datosCompletitud } from "@/lib/completitud";
 import { compatibilidad, ETIQUETA_INTERES, ETIQUETA_RELACION, INTERESES_EDITABLES, primerNombre } from "@/lib/social";
 import Avatar from "@/components/Avatar";
 import AnuncioCard from "@/components/AnuncioCard";
 import PostCard from "@/components/PostCard";
+import BarraCompletitud from "@/components/BarraCompletitud";
+import Chips from "@/components/Chips";
 import SeccionFotos from "@/features/fotos/SeccionFotos";
+import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
 import { estaturaCm, MAX_PAREJA_IDEAL, MIN_PAREJA_IDEAL } from "@/features/onboarding/validacion";
 import {
   AstralBadge,
@@ -52,6 +55,22 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
 
   const usuario = obtenerUsuario(usuarioId);
   const esPropio = usuarioId === "yo";
+
+  // Las fotos del propio perfil cuentan para el porcentaje de completado; se releen cuando el perfil cambia (alta/baja de fotos).
+  const fotosPropias = useFotosPerfil(esPropio ? sesion.uid : null);
+  const recargarFotosPropias = fotosPropias.recargar;
+  const primeraCarga = useRef(true);
+  useEffect(() => {
+    if (primeraCarga.current) {
+      primeraCarga.current = false;
+      return;
+    }
+    void recargarFotosPropias();
+  }, [estado.yo, recargarFotosPropias]);
+  const completitud = useMemo(
+    () => (esPropio ? completitudPerfil(datosCompletitud(estado.yo, fotosPropias.fotos.length)) : null),
+    [esPropio, estado.yo, fotosPropias.fotos.length],
+  );
 
   const ofertas = useMemo(() => anuncios.filter((a) => a.duenoId === usuarioId), [anuncios, usuarioId]);
   const guardadas = useMemo(() => anuncios.filter((a) => estado.guardadas.includes(a.id)), [anuncios, estado.guardadas]);
@@ -107,7 +126,7 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
               {esPropio ? (
                 <>
                   <button type="button" onClick={() => setEditando((v) => !v)} className="rounded-full border border-slate-300 px-5 py-2 text-sm font-semibold hover:bg-slate-50">
-                    {editando ? "Cerrar edición" : "Editar perfil"}
+                    {editando ? "Cerrar edición" : completitud && completitud.porcentaje < 100 ? `Editar información · ${completitud.porcentaje}% completado` : "Editar perfil"}
                   </button>
                   {esAdmin && (
                     <Link href="/admin/kyc" className="rounded-full border border-violet-300 px-5 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50">
@@ -191,6 +210,8 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
             </p>
           )}
 
+          {completitud && !editando && <BarraCompletitud completitud={completitud} onCompletar={() => setEditando(true)} className="mt-4" />}
+
           <SeccionFotos uid={esPropio ? sesion.uid : usuario.id} esPropio={esPropio} />
 
           <div className="mt-4 grid grid-cols-3 gap-3 rounded-xl bg-slate-50 p-3 text-center">
@@ -237,7 +258,7 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
             </div>
             <div>
               <h2 className="mb-2 text-sm font-bold text-slate-700">Intereses, zonas y estilo de vida</h2>
-              {usuario.intereses.length === 0 && usuario.zonas.length === 0 ? (
+              {usuario.intereses.length === 0 && usuario.zonas.length === 0 && !(usuario.valores?.length) ? (
                 <p className="text-sm text-slate-500">{esPropio ? "Añade tus intereses y zonas para recibir mejores matches." : "Sin información todavía."}</p>
               ) : (
                 <div className="space-y-2">
@@ -256,6 +277,15 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
                       {usuario.estilo.map((s) => (
                         <li key={s} className="rounded-full bg-pink-50 px-3 py-1 text-xs font-medium text-pink-700">
                           {s}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                  {usuario.valores && usuario.valores.length > 0 && (
+                    <ul aria-label="Valores" className="flex flex-wrap gap-2">
+                      {usuario.valores.map((v) => (
+                        <li key={v} className="rounded-full bg-violet-50 px-3 py-1 text-xs font-medium text-violet-700">
+                          ✦ {v}
                         </li>
                       ))}
                     </ul>
@@ -301,7 +331,7 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
         </div>
       </section>
 
-      {esPropio && editando && <EditarPerfil onCerrar={() => setEditando(false)} />}
+      {esPropio && editando && <EditarPerfil onCerrar={() => setEditando(false)} nFotos={fotosPropias.fotos.length} />}
 
       <div role="tablist" className="mt-6 flex gap-1 overflow-x-auto border-b border-slate-200">
         {pestanas.map((t) => (
@@ -395,7 +425,7 @@ function Vacio({ texto, cta }: { texto: string; cta?: { href: string; label: str
   );
 }
 
-function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
+function EditarPerfil({ onCerrar, nFotos }: { onCerrar: () => void; nFotos: number }) {
   const { estado, editarPerfil } = useSocial();
   const yo = estado.yo;
   const [guardando, setGuardando] = useState(false);
@@ -409,6 +439,9 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
   const [colegio, setColegio] = useState(yo.colegio ?? "");
   const [estatura, setEstatura] = useState(yo.estatura ? String(yo.estatura) : "");
   const [parejaIdeal, setParejaIdeal] = useState(yo.parejaIdeal ?? "");
+  const [valores, setValores] = useState<string[]>(yo.valores ?? []);
+  const [parejaValores, setParejaValores] = useState<string[]>(yo.parejaIdealValores ?? []);
+  const [parejaEstilo, setParejaEstilo] = useState<string[]>(yo.parejaIdealEstilo ?? []);
   const [intereses, setIntereses] = useState<Interes[]>(yo.intereses);
   const [zonas, setZonas] = useState<string[]>(yo.zonas);
   const [relaciones, setRelaciones] = useState<TipoRelacion[]>(yo.relaciones ?? []);
@@ -420,6 +453,20 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const archivo = useRef<HTMLInputElement>(null);
   const archivoPortafolio = useRef<HTMLInputElement>(null);
+
+  // Porcentaje en vivo: se actualiza mientras editas, antes de guardar.
+  const completitud = completitudPerfil({
+    bio,
+    fotos: nFotos,
+    ubicacion,
+    zonas,
+    intereses,
+    estilo,
+    parejaIdeal,
+    relaciones,
+    parejaIdealValores: parejaValores,
+    parejaIdealEstilo: parejaEstilo,
+  });
 
   const alternar = <T,>(lista: T[], v: T) => (lista.includes(v) ? lista.filter((x) => x !== v) : [...lista, v]);
 
@@ -482,6 +529,9 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
       colegio: colegio.trim(),
       estatura: estaturaCm(estatura) ?? undefined,
       parejaIdeal: parejaIdeal.trim(),
+      valores,
+      parejaIdealValores: parejaValores,
+      parejaIdealEstilo: parejaEstilo,
       intereses,
       zonas,
       relaciones,
@@ -498,7 +548,10 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
 
   return (
     <form onSubmit={guardar} className="mt-4 space-y-5 rounded-2xl border border-brand-200 bg-white p-5 shadow-sm">
-      <h2 className="text-lg font-bold">Editar perfil</h2>
+      <div className="sticky top-16 z-30 -mx-5 -mt-5 rounded-t-2xl border-b border-slate-200 bg-white/95 px-5 py-3 backdrop-blur">
+        <h2 className="text-lg font-bold">Editar información</h2>
+        <BarraCompletitud completitud={completitud} compacta className="mt-1" />
+      </div>
 
       <div className="flex items-center gap-4">
         <Avatar nombre={nombre || "Tú"} foto={foto} tamano="lg" />
@@ -553,11 +606,6 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
         <textarea id="pf-bio" value={bio} onChange={(e) => setBio(e.target.value)} rows={3} maxLength={240} className={campo} />
       </div>
 
-      <div>
-        <label htmlFor="pf-pareja" className="mb-1 block text-sm font-medium">Tu pareja ideal <span className="font-normal text-slate-500">(privado: solo tú lo ves; alimenta tus recomendaciones)</span></label>
-        <textarea id="pf-pareja" value={parejaIdeal} onChange={(e) => setParejaIdeal(e.target.value)} rows={4} maxLength={MAX_PAREJA_IDEAL} className={campo} />
-      </div>
-
       <fieldset>
         <legend className="mb-2 text-sm font-medium">¿Qué buscas en la comunidad?</legend>
         <div className="flex flex-wrap gap-2">
@@ -581,18 +629,7 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
       </fieldset>
 
       <fieldset>
-        <legend className="mb-2 text-sm font-medium">Tipo de conexión en Citas</legend>
-        <div className="flex flex-wrap gap-2">
-          {(Object.keys(ETIQUETA_RELACION) as TipoRelacion[]).map((r) => (
-            <button key={r} type="button" aria-pressed={relaciones.includes(r)} onClick={() => setRelaciones((l) => alternar(l, r))} className={chip(relaciones.includes(r), "border-pink-600 bg-pink-600 text-white")}>
-              {ETIQUETA_RELACION[r]}
-            </button>
-          ))}
-        </div>
-      </fieldset>
-
-      <fieldset>
-        <legend className="mb-2 text-sm font-medium">Estilo de vida</legend>
+        <legend className="mb-2 text-sm font-medium">Tu estilo de vida</legend>
         <div className="flex flex-wrap gap-2">
           {ESTILOS_VIDA.map((s) => (
             <button key={s} type="button" aria-pressed={estilo.includes(s)} onClick={() => setEstilo((l) => alternar(l, s))} className={chip(estilo.includes(s), "border-fuchsia-600 bg-fuchsia-600 text-white")}>
@@ -601,6 +638,36 @@ function EditarPerfil({ onCerrar }: { onCerrar: () => void }) {
           ))}
         </div>
       </fieldset>
+
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium">Tus valores <span className="font-normal text-slate-500">(hasta {MAX_VALORES}; se muestran en tu perfil)</span></legend>
+        <Chips<string> opciones={VALORES} valor={valores} onChange={setValores} etiqueta={(o) => o} color="border-violet-600 bg-violet-600 text-white" max={MAX_VALORES} />
+      </fieldset>
+
+      <section aria-labelledby="pf-pareja-titulo" className="space-y-4 rounded-xl border border-pink-200 bg-pink-50/40 p-4">
+        <div>
+          <h3 id="pf-pareja-titulo" className="text-sm font-bold text-ink">💞 Tu pareja ideal</h3>
+          <p className="text-xs text-slate-500">
+            Lo que escribes y marcas aquí es privado: solo tú lo ves. Lo usamos para calcular tu porcentaje de afinidad con cada persona en Explorar y Citas.
+          </p>
+        </div>
+        <div>
+          <label htmlFor="pf-pareja" className="mb-1 block text-sm font-medium">Descríbela con tus palabras</label>
+          <textarea id="pf-pareja" value={parejaIdeal} onChange={(e) => setParejaIdeal(e.target.value)} rows={4} maxLength={MAX_PAREJA_IDEAL} className={campo} />
+        </div>
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium">Tipo de relación que buscas <span className="font-normal text-slate-500">(también define en qué apartados de Citas apareces)</span></legend>
+          <Chips<TipoRelacion> opciones={Object.keys(ETIQUETA_RELACION) as TipoRelacion[]} valor={relaciones} onChange={setRelaciones} etiqueta={(o) => ETIQUETA_RELACION[o]} color="border-pink-600 bg-pink-600 text-white" />
+        </fieldset>
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium">Valores que buscas <span className="font-normal text-slate-500">(hasta {MAX_VALORES})</span></legend>
+          <Chips<string> opciones={VALORES} valor={parejaValores} onChange={setParejaValores} etiqueta={(o) => o} color="border-rose-600 bg-rose-600 text-white" max={MAX_VALORES} />
+        </fieldset>
+        <fieldset>
+          <legend className="mb-2 text-sm font-medium">Estilo de vida que buscas <span className="font-normal text-slate-500">(hasta {MAX_VALORES})</span></legend>
+          <Chips<string> opciones={ESTILOS_VIDA} valor={parejaEstilo} onChange={setParejaEstilo} etiqueta={(o) => o} color="border-fuchsia-600 bg-fuchsia-600 text-white" max={MAX_VALORES} />
+        </fieldset>
+      </section>
 
       <fieldset className="space-y-3 rounded-xl bg-slate-50 p-4">
         <legend className="px-1 text-sm font-medium">Perfil profesional (opcional)</legend>

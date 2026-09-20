@@ -11,6 +11,7 @@ export interface PerfilFila {
   zones: string[];
   relations: string[];
   lifestyle: string[];
+  core_values?: string[];
   budget: string | null;
   age: number | null;
   sign: string | null;

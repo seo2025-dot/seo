@@ -4,9 +4,11 @@
  */
 import assert from "node:assert/strict";
 import { sincronizarFotos } from "@/features/fotos/sincronizar";
-import { BORRADOR_VACIO, PASOS, edadDesde, estaturaCm, normalizarUsuario, validarBasico, validarFotos, validarIntereses, validarPareja } from "@/features/onboarding/validacion";
+import { BORRADOR_VACIO, MIN_PAREJA_IDEAL, PASOS, edadDesde, estaturaCm, normalizarUsuario, validarBasico, validarFotos, validarIntereses, validarPareja } from "@/features/onboarding/validacion";
 import { bienvenidaNueva, frasesPruebaSocial, itemsOportunidad, saludoRecurrente } from "@/lib/mensajes";
 import { REFLEXIONES, reflexionDelDia } from "@/lib/reflexiones";
+import { MINIMOS, completitudPerfil, datosCompletitud } from "@/lib/completitud";
+import { MAX_VALORES, VALORES } from "@/data/catalogos";
 import { RETOS, msHastaReinicio, resumenRetos } from "@/lib/retos";
 import { HITOS, codigoValido, mensajeInvitacion, nivelDe, progresoCirculo, siguienteHito, siguienteNivel, urlInvitacion } from "@/lib/referidos";
 
@@ -234,6 +236,65 @@ await test("reflexiones: rotan por día, son deterministas y solo llevan fuente 
   assert.notEqual(reflexionDelDia(new Date(2026, 3, 1), 1).texto, reflexionDelDia(new Date(2026, 3, 1)).texto);
   for (const r of REFLEXIONES) assert.ok(!r.fuente || /Kardec/.test(r.fuente), "solo llevan fuente las citas de la obra");
   assert.ok(REFLEXIONES.filter((r) => r.fuente).length <= 3, "las citas textuales son pocas y comprobables");
+});
+
+const PERFIL_VACIO = { bio: "", fotos: 0, ubicacion: "", zonas: [], intereses: [], estilo: [], parejaIdeal: "", relaciones: [], parejaIdealValores: [], parejaIdealEstilo: [] };
+const PERFIL_LLENO = {
+  bio: "Restauro pintura colonial y modelo cerámica en un taller junto al río, y creo en las sobremesas largas.",
+  fotos: 4, ubicacion: "Cuenca", zonas: ["Centro"], intereses: ["amigos"], estilo: ["Creativo", "Lector"],
+  parejaIdeal: "Alguien sereno, honesto y con ganas de construir un hogar", relaciones: ["pareja"], parejaIdealValores: ["Honestidad"], parejaIdealEstilo: ["Lector"],
+};
+
+await test("completitud: perfil vacío 0 %, perfil completo 100 % y los pesos suman 100", () => {
+  const v = completitudPerfil(PERFIL_VACIO);
+  assert.equal(v.porcentaje, 0);
+  assert.equal(v.faltantes.length, 6);
+  assert.equal(v.items.reduce((t, i) => t + i.peso, 0), 100);
+  const l = completitudPerfil(PERFIL_LLENO);
+  assert.equal(l.porcentaje, 100);
+  assert.deepEqual(l.faltantes, []);
+  assert.ok(l.items.every((i) => i.hecho));
+});
+
+await test("completitud: cada apartado aporta su peso y admite avance parcial", () => {
+  const solo = (campos) => completitudPerfil({ ...PERFIL_VACIO, ...campos });
+  assert.equal(solo({ fotos: 3 }).porcentaje, 20);
+  assert.equal(solo({ fotos: 1 }).porcentaje, 7); // 1/3 de 20
+  assert.equal(solo({ fotos: 9 }).porcentaje, 20, "más fotos de las necesarias no pasan del tope");
+  assert.equal(solo({ bio: "x".repeat(60) }).porcentaje, 15);
+  assert.equal(solo({ bio: "x".repeat(30) }).porcentaje, 8); // 7,5 redondeado
+  assert.equal(solo({ ubicacion: "Quito" }).porcentaje, 8);
+  assert.equal(solo({ ubicacion: "Quito", zonas: ["Centro"] }).porcentaje, 15);
+  assert.equal(solo({ intereses: ["amigos"], estilo: ["Lector", "Foodie"] }).porcentaje, 15);
+  assert.equal(solo({ parejaIdeal: "x".repeat(20) }).porcentaje, 15);
+  assert.equal(solo({ relaciones: ["pareja"] }).porcentaje, 7);
+  assert.equal(solo({ relaciones: ["pareja"], parejaIdealValores: ["Fe"], parejaIdealEstilo: ["Gamer"] }).porcentaje, 20);
+  assert.equal(solo({ bio: "   " }).porcentaje, 0, "los espacios no cuentan");
+});
+
+await test("completitud: los faltantes van del apartado que más suma al que menos y dan una ayuda concreta", () => {
+  const c = completitudPerfil({ ...PERFIL_LLENO, fotos: 1, bio: "", relaciones: [] });
+  // Sin biografía faltan 15 puntos; con 1 de 3 fotos, 13,3; con 2 de 3 opciones de «qué buscas» marcadas, 6,7.
+  assert.deepEqual(c.faltantes.map((f) => f.id), ["bio", "fotos", "parejaBusca"]);
+  assert.match(c.faltantes[1].ayuda, /Sube 3 fotos \(tienes 1\)/);
+  assert.equal(c.porcentaje, 100 - 13 - 15 - 7);
+});
+
+await test("completitud: el mínimo de la pareja ideal coincide con el que exige el servidor (20 caracteres)", () => {
+  assert.equal(MINIMOS.parejaTexto, MIN_PAREJA_IDEAL);
+  assert.equal(completitudPerfil({ ...PERFIL_LLENO, parejaIdeal: "x".repeat(19) }).faltantes[0].id, "parejaTexto");
+});
+
+await test("completitud: datosCompletitud toma los campos privados del perfil propio", () => {
+  const d = datosCompletitud({ bio: "b", ubicacion: "u", zonas: [], intereses: [], parejaIdeal: "p", relaciones: ["pareja"], parejaIdealValores: ["Fe"] }, 2);
+  assert.deepEqual([d.fotos, d.estilo, d.parejaIdealEstilo, d.parejaIdealValores, d.relaciones], [2, [], [], ["Fe"], ["pareja"]]);
+  assert.equal(datosCompletitud({ bio: "", ubicacion: "", zonas: [], intereses: [] }, 0).parejaIdeal, "");
+});
+
+await test("catálogo de valores: sin repetidos, con límite razonable", () => {
+  assert.equal(new Set(VALORES).size, VALORES.length);
+  assert.ok(VALORES.length >= 10 && MAX_VALORES >= 3 && MAX_VALORES <= 8, "el servidor admite como máximo 8");
+  assert.ok(VALORES.every((v) => v.length <= 40));
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);
