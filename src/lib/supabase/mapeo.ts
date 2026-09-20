@@ -47,7 +47,15 @@ export const IMAGEN_VACIA =
   );
 
 // ── Perfiles ────────────────────────────────────────────────────────────────
-export function mapearPerfil(p: PerfilFila, yo: string | null, privado?: { nacimiento?: string | null; parejaIdeal?: string | null }): Usuario {
+/** Datos de user_private que solo existen en el perfil propio. */
+export interface PrivadoPropio {
+  nacimiento?: string | null;
+  parejaIdeal?: string | null;
+  parejaIdealValores?: string[] | null;
+  parejaIdealEstilo?: string[] | null;
+}
+
+export function mapearPerfil(p: PerfilFila, yo: string | null, privado?: PrivadoPropio): Usuario {
   const prof = p.professional;
   return {
     id: aIdApp(p.id, yo),
@@ -71,6 +79,9 @@ export function mapearPerfil(p: PerfilFila, yo: string | null, privado?: { nacim
     signo: (p.sign as Signo | null) ?? undefined,
     nacimiento: privado?.nacimiento ?? undefined,
     parejaIdeal: privado?.parejaIdeal ?? undefined,
+    parejaIdealValores: privado?.parejaIdealValores ?? undefined,
+    parejaIdealEstilo: privado?.parejaIdealEstilo ?? undefined,
+    valores: p.core_values ?? [],
     universidad: p.university ?? undefined,
     colegio: p.school ?? undefined,
     estatura: p.height_cm ?? undefined,
@@ -251,6 +262,7 @@ export function mapearPosts(posts: PostFila[], likes: LikeFila[], comentarios: C
     imagen: p.image_url ?? undefined,
     ts: ms(p.created_at),
     likes: likes.filter((l) => l.post_id === p.id).map((l) => aIdApp(l.user_id, yo)),
+    reacciones: Object.fromEntries(likes.filter((l) => l.post_id === p.id).map((l) => [aIdApp(l.user_id, yo), l.reaction ?? "like"])),
     comentarios: comentarios
       .filter((c) => c.post_id === p.id)
       .map<Comentario>((c) => ({ id: c.id, autorId: aIdApp(c.author_id, yo), texto: c.body, ts: ms(c.created_at) }))

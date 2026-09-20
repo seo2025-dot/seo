@@ -2085,3 +2085,368 @@ revoke execute on function
   from public, anon, authenticated;
 
 -- ACTUALIZACION-003-FIN
+
+-- ACTUALIZACION-004-INICIO
+-- ============================================================================
+-- ACTUALIZACIÓN 004 · Pareja ideal estructurada y motor de afinidad con desglose
+--
+-- · Si ya aplicaste schema.sql ANTES de esta actualización (con la 003): ejecuta SOLO este archivo (SQL Editor > Run).
+-- · Si vas a instalar desde cero: schema.sql ya incluye este contenido al final; no hace falta ejecutarlo aparte.
+-- Es idempotente: se puede ejecutar más de una vez.
+--
+-- Qué añade:
+--   · profiles.core_values      → los valores con los que TÚ te identificas (públicos, se muestran en el perfil).
+--   · user_private.ideal_values → los valores que buscas en tu pareja (privados).
+--   · user_private.ideal_lifestyle → el estilo de vida que buscas en tu pareja (privado).
+--     El «tipo de relación» que buscas sigue siendo profiles.relations (ya era público y filtra en /citas).
+--   · recommend_people() devuelve, además del puntaje, el porcentaje de afinidad por dimensión
+--     (valores, estilo de vida, tipo de relación) para pintarlo en las tarjetas de /explorar y /citas.
+--
+-- Privacidad: lo que buscas (ideal_*) solo lo lee su dueño; el motor lo usa dentro de funciones SECURITY DEFINER y
+-- solo devuelve porcentajes, nunca los textos ni las listas de la otra persona.
+-- ============================================================================
+
+-- ── 1. Columnas nuevas ──────────────────────────────────────────────────────
+alter table public.profiles
+  add column if not exists core_values text[] not null default '{}'
+    check (cardinality(core_values) <= 8 and char_length(array_to_string(core_values, '|')) <= 400);
+
+alter table public.user_private
+  add column if not exists ideal_values text[] not null default '{}'
+    check (cardinality(ideal_values) <= 8 and char_length(array_to_string(ideal_values, '|')) <= 400),
+  add column if not exists ideal_lifestyle text[] not null default '{}'
+    check (cardinality(ideal_lifestyle) <= 8 and char_length(array_to_string(ideal_lifestyle, '|')) <= 400);
+
+grant update (core_values) on public.profiles to authenticated;
+grant update (ideal_values, ideal_lifestyle) on public.user_private to authenticated;
+
+-- ── 2. Piezas del cálculo ───────────────────────────────────────────────────
+-- Etiqueta comparable: sin acentos ni mayúsculas y sin la marca de género/plural final («Casero» = «Casera»).
+create or replace function public._tags(p_tags text[]) returns text[]
+language sql immutable as $$
+  select coalesce(array(
+    select distinct regexp_replace(public._norm(x), '[ao]s?$', '')
+      from unnest(coalesce(p_tags, '{}'::text[])) x
+     where btrim(coalesce(x, '')) <> ''
+  ), '{}'::text[]);
+$$;
+
+-- Qué parte de lo que se busca aparece en lo que se tiene (0–1). NULL si falta alguno de los dos lados.
+create or replace function public._cobertura(p_busca text[], p_tiene text[]) returns numeric
+language sql immutable as $$
+  select case when cardinality(p_busca) > 0 and cardinality(p_tiene) > 0
+              then (select count(*) from unnest(p_busca) x where x = any (p_tiene))::numeric / cardinality(p_busca)
+         end;
+$$;
+
+-- Afinidad 0–100 en una dimensión. Pesa 70 % lo que TÚ buscas frente a lo que la otra persona tiene, y 30 % lo que ELLA/ÉL
+-- busca frente a lo que tú tienes (reciprocidad). Si alguien no dijo qué busca, se compara con lo que ya tiene (afinidad
+-- por parecido). NULL cuando no hay datos suficientes de tu lado: es «sin información», no un 0 %.
+create or replace function public._afinidad(p_mi_ideal text[], p_mio text[], p_su_ideal text[], p_suyo text[]) returns int
+language sql immutable as $$
+  with t as (
+    select public._cobertura(case when cardinality(p_mi_ideal) > 0 then p_mi_ideal else p_mio end, p_suyo) as a,
+           public._cobertura(case when cardinality(p_su_ideal) > 0 then p_su_ideal else p_suyo end, p_mio) as b
+  )
+  select case when a is null then null
+              when b is null then round(100 * a)::int
+              else round(100 * (0.7 * a + 0.3 * b))::int
+         end
+    from t;
+$$;
+
+-- Los valores propios también cuentan cuando el texto de la pareja ideal se compara con cómo se describe cada perfil.
+create or replace function public._doc_lex(p public.profiles) returns text[]
+language sql immutable as $$
+  select public._lex(concat_ws(' ', p.bio, p.university, p.school, p.location,
+                               array_to_string(p.lifestyle, ' '), array_to_string(p.interests, ' '),
+                               array_to_string(p.core_values, ' '),
+                               p.professional ->> 'headline'));
+$$;
+
+-- ── 3. Motor de recomendación con desglose ──────────────────────────────────
+-- El tipo de retorno cambia (columnas nuevas): hay que recrear la función.
+drop function if exists public.recommend_people(int, int, int, int, int, int);
+
+-- Devuelve personas ordenadas por afinidad (0–100), con motivos y el porcentaje de cada dimensión.
+-- Reparto de los 100 puntos (100 % = encaje total):
+--   · 25  lo que TÚ describes como pareja ideal  ↔  cómo se describe cada perfil (texto)
+--   · 10  lo que ELLA/ÉL describe como ideal     ↔  cómo te describes tú (texto, reciprocidad)
+--   · 15  valores        (pct_values × 15 %)
+--   · 12  estilo de vida (pct_lifestyle × 12 %)
+--   · 10  tipo de relación (pct_relation × 10 %)
+--   · 9   universidad (6) y colegio (3) compartidos
+--   · 6   intereses en común (hasta 2)
+--   · 6   zona en común
+--   · 7   afinidad astral
+-- Oculta a quienes ya descartaste. No devuelve ningún texto privado, solo puntajes y motivos genéricos.
+create or replace function public.recommend_people(
+  p_min_age int default null, p_max_age int default null,
+  p_min_height int default null, p_max_height int default null,
+  p_limit int default 24, p_offset int default 0
+) returns table (person_id uuid, score int, reasons text[], pct_values int, pct_lifestyle int, pct_relation int)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me uuid := auth.uid();
+  v_me public.profiles;
+  v_ideal text[];
+  v_mydoc text[];
+  v_iv text[];
+  v_il text[];
+  v_mv text[];
+  v_ml text[];
+  v_mr text[];
+begin
+  if me is null then raise exception 'No autenticado' using errcode = '28000'; end if;
+  select * into v_me from public.profiles where id = me;
+  select public._lex(ideal_partner), public._tags(ideal_values), public._tags(ideal_lifestyle)
+    into v_ideal, v_iv, v_il
+    from public.user_private where user_id = me;
+  v_ideal := coalesce(v_ideal, '{}');
+  v_iv := coalesce(v_iv, '{}');
+  v_il := coalesce(v_il, '{}');
+  v_mydoc := public._doc_lex(v_me);
+  v_mv := public._tags(v_me.core_values);
+  v_ml := public._tags(v_me.lifestyle);
+  v_mr := public._tags(v_me.relations);
+
+  return query
+  with cand as (
+    select p.id as pid, p.university, p.school, p.interests, p.zones, p.sign,
+           public._doc_lex(p) as doc_lex, public._lex(up.ideal_partner) as ideal_lex,
+           public._tags(p.core_values) as t_val, public._tags(up.ideal_values) as t_ival,
+           public._tags(p.lifestyle) as t_life, public._tags(up.ideal_lifestyle) as t_ilife,
+           public._tags(p.relations) as t_rel
+      from public.profiles p
+      join public.user_private up on up.user_id = p.id
+     where p.id <> me
+       and p.onboarding_completed
+       and (p_min_age is null or p.age >= p_min_age)
+       and (p_max_age is null or p.age <= p_max_age)
+       and (p_min_height is null or p.height_cm >= p_min_height)
+       and (p_max_height is null or p.height_cm <= p_max_height)
+       and not exists (select 1 from public.person_swipes s where s.from_user = me and s.to_user = p.id and s.action = 'pass')
+  ), calc as (
+    select c.pid,
+      (select count(*)::int from unnest(v_ideal) x where x = any (c.doc_lex))    as hits,
+      (select count(*)::int from unnest(c.ideal_lex) x where x = any (v_mydoc))  as rhits,
+      cardinality(c.ideal_lex) as their_n,
+      (v_me.university is not null and c.university is not null and public._norm(v_me.university) = public._norm(c.university)) as same_uni,
+      (v_me.school is not null and c.school is not null and public._norm(v_me.school) = public._norm(c.school)) as same_school,
+      cardinality(array(select unnest(c.interests) intersect select unnest(v_me.interests))) as n_int,
+      (c.zones && v_me.zones) as same_zone,
+      public._afinidad(v_iv, v_mv, c.t_ival, c.t_val)                 as p_val,
+      public._afinidad(v_il, v_ml, c.t_ilife, c.t_life)               as p_life,
+      public._afinidad('{}'::text[], v_mr, '{}'::text[], c.t_rel)     as p_rel,
+      case when c.sign is not null and v_me.sign is not null then public.astral_score(v_me.sign, c.sign, 'pareja') end as astral
+      from cand c
+  ), scored as (
+    select k.pid, k.hits, k.p_val, k.p_life, k.p_rel,
+      least(100,
+          case when cardinality(v_ideal) = 0 then 0 else round(25 * least(1, k.hits::numeric / greatest(1, least(4, cardinality(v_ideal))))) end
+        + case when k.their_n = 0 then 0 else round(10 * least(1, k.rhits::numeric / greatest(1, least(4, k.their_n)))) end
+        + round(coalesce(k.p_val, 0) * 0.15)
+        + round(coalesce(k.p_life, 0) * 0.12)
+        + round(coalesce(k.p_rel, 0) * 0.10)
+        + case when k.same_uni then 6 else 0 end
+        + case when k.same_school then 3 else 0 end
+        + least(2, k.n_int) * 3
+        + case when k.same_zone then 6 else 0 end
+        + round(coalesce(k.astral, 0) * 0.07)
+      )::int as pts,
+      array_remove(array[
+        case when k.hits > 0 then 'Encaja con ' || k.hits || case when k.hits = 1 then ' rasgo' else ' rasgos' end || ' de tu pareja ideal' end,
+        case when coalesce(k.p_val, 0) >= 50 then 'Valores afines' end,
+        case when k.same_uni then 'Comparten universidad' end,
+        case when k.same_school then 'Fueron al mismo colegio' end,
+        case when k.n_int > 0 then 'Intereses en común' end,
+        case when coalesce(k.p_life, 0) >= 50 then 'Estilo de vida afín' end,
+        case when k.same_zone then 'Misma zona' end,
+        case when coalesce(k.p_rel, 0) >= 50 then 'Buscan lo mismo' end,
+        case when coalesce(k.astral, 0) >= 75 then 'Gran afinidad astral' end
+      ], null) as why
+      from calc k
+  )
+  select s.pid, s.pts, s.why, s.p_val, s.p_life, s.p_rel from scored s
+   order by s.pts desc, s.pid
+   limit greatest(1, least(coalesce(p_limit, 24), 60)) offset greatest(0, coalesce(p_offset, 0));
+end $$;
+
+-- ── 4. Privilegios de ejecución ─────────────────────────────────────────────
+grant execute on function public.recommend_people(int, int, int, int, int, int) to authenticated;
+revoke execute on function
+  public._tags(text[]), public._cobertura(text[], text[]), public._afinidad(text[], text[], text[], text[])
+  from public, anon, authenticated;
+
+-- ACTUALIZACION-004-FIN
+
+-- ACTUALIZACION-005-INICIO
+-- ============================================================================
+-- ACTUALIZACIÓN 005 · Comunidad viva: reacciones, miembros recientes, Top Conectores y avisos sociales
+--
+-- · Si ya aplicaste schema.sql ANTES de esta actualización (con la 004): ejecuta SOLO este archivo (SQL Editor > Run).
+-- · Si vas a instalar desde cero: schema.sql ya incluye este contenido al final; no hace falta ejecutarlo aparte.
+-- Es idempotente: se puede ejecutar más de una vez.
+--
+-- Qué añade:
+--   · post_likes.reaction        → reacciones rápidas (👍 ❤️ 😂 😮 👏). Los «me gusta» anteriores quedan como 'like'.
+--   · recent_members()           → últimas personas reales que se unieron (solo nombre de pila, ciudad y foto). Sin perfiles demo.
+--   · top_connectors() y my_connector_status() → ranking de actividad de los últimos 30 días («Top Conector»). Sin perfiles demo.
+--   · Avisos en tiempo real: comentar o reaccionar a una publicación avisa a su autor (por la tabla notifications).
+--
+-- Todas las cifras salen de actividad real. Nada se inventa ni se simula en el servidor.
+-- ============================================================================
+
+-- ── 1. Reacciones rápidas ───────────────────────────────────────────────────
+alter table public.post_likes
+  add column if not exists reaction text not null default 'like'
+    check (reaction in ('like', 'love', 'haha', 'wow', 'clap'));
+
+grant insert (reaction), update (reaction) on public.post_likes to authenticated;
+
+drop policy if exists post_likes_update on public.post_likes;
+create policy post_likes_update on public.post_likes for update to authenticated
+  using (user_id = auth.uid()) with check (user_id = auth.uid());
+
+-- ── 2. Miembros recientes (prueba social real) ──────────────────────────────
+-- Solo personas reales con el perfil completo. Se expone lo mínimo: nombre de pila, foto y ciudad.
+create or replace function public.recent_members(p_limit int default 12)
+returns table (member_id uuid, first_name text, avatar_url text, city text, joined_at timestamptz)
+language sql stable security definer set search_path = public as $$
+  select p.id, split_part(btrim(p.display_name), ' ', 1), p.avatar_url,
+         nullif(btrim(split_part(p.location, ' · ', 1)), ''), p.created_at
+    from public.profiles p
+   where p.onboarding_completed and not p.is_demo
+   order by p.created_at desc, p.id
+   limit greatest(1, least(coalesce(p_limit, 12), 30));
+$$;
+
+-- ── 3. Actividad y «Top Conector» ───────────────────────────────────────────
+-- Puntos de los últimos 30 días, con tope por categoría para que nadie domine solo repitiendo una acción:
+--   publicar +3 (máx. 30) · reacciones recibidas +1 (máx. 50) · comentarios recibidos +2 (máx. 40) ·
+--   comentar en publicaciones ajenas +1 (máx. 20) · invitados confirmados +10 (máx. 100) · matches +2 (máx. 20).
+-- Las acciones sobre tu propia publicación no cuentan. Los perfiles demo no participan.
+create or replace function public._connector_scores() returns table (user_id uuid, score int)
+language sql stable security definer set search_path = public as $$
+  with act as (
+    select author_id as u, least(30, 3 * count(*))::int as pts
+      from public.posts where created_at > now() - interval '30 days' group by author_id
+    union all
+    select p.author_id, least(50, count(*))::int
+      from public.post_likes l join public.posts p on p.id = l.post_id
+     where l.created_at > now() - interval '30 days' and l.user_id <> p.author_id group by p.author_id
+    union all
+    select p.author_id, least(40, 2 * count(*))::int
+      from public.post_comments c join public.posts p on p.id = c.post_id
+     where c.created_at > now() - interval '30 days' and c.author_id <> p.author_id group by p.author_id
+    union all
+    select c.author_id, least(20, count(*))::int
+      from public.post_comments c join public.posts p on p.id = c.post_id
+     where c.created_at > now() - interval '30 days' and c.author_id <> p.author_id group by c.author_id
+    union all
+    select referrer_id, least(100, 10 * count(*))::int
+      from public.referrals where rewarded_at > now() - interval '30 days' group by referrer_id
+    union all
+    select m.u, least(20, 2 * count(*))::int
+      from (select user_a as u from public.matches where created_at > now() - interval '30 days'
+            union all
+            select user_b from public.matches where created_at > now() - interval '30 days') m
+     group by m.u
+  )
+  select a.u, sum(a.pts)::int
+    from act a join public.profiles pr on pr.id = a.u
+   where not pr.is_demo and pr.onboarding_completed
+   group by a.u
+  having sum(a.pts) > 0;
+$$;
+
+-- Ranking público de los perfiles más activos. Para figurar hacen falta al menos 10 puntos (no basta una acción suelta).
+create or replace function public.top_connectors(p_limit int default 10)
+returns table (person_id uuid, display_name text, avatar_url text, city text, score int, rank int)
+language sql stable security definer set search_path = public as $$
+  select s.user_id, p.display_name, p.avatar_url, nullif(btrim(split_part(p.location, ' · ', 1)), ''), s.score,
+         (rank() over (order by s.score desc))::int
+    from public._connector_scores() s join public.profiles p on p.id = s.user_id
+   where s.score >= 10
+   order by s.score desc, p.created_at, p.id
+   limit greatest(1, least(coalesce(p_limit, 10), 25));
+$$;
+
+-- Tu posición: puntos, puesto y lo que te falta para entrar en el Top 10. `rank` es null si aún no sumas puntos.
+create or replace function public.my_connector_status() returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  v_score int;
+  v_rank int;
+  v_tenth int;
+begin
+  if me is null then raise exception 'No autenticado' using errcode = '28000'; end if;
+  select coalesce(max(score), 0) into v_score from public._connector_scores() where user_id = me;
+  select count(*)::int + 1 into v_rank from public._connector_scores() where score > v_score;
+  -- Con menos de 10 personas en el ranking cualquiera con 10 puntos entra; solo si está lleno hay que superar al décimo.
+  select case when count(*) >= 10 then min(score) else 0 end into v_tenth
+    from (select score from public._connector_scores() where score >= 10 order by score desc limit 10) t;
+  return jsonb_build_object(
+    'score', v_score,
+    'rank', case when v_score > 0 then v_rank end,
+    'is_top', v_score >= 10 and v_rank <= 10,
+    'threshold', greatest(10, v_tenth)   -- puntos que hay que alcanzar para figurar en el Top 10
+  );
+end $$;
+
+-- ── 4. Avisos sociales en tiempo real ───────────────────────────────────────
+-- El autor recibe un aviso cuando alguien comenta o reacciona a su publicación (la tabla notifications ya emite en tiempo real).
+-- Un aviso por persona y publicación para reacciones: cambiar de reacción no duplica el aviso.
+create or replace function public._notify_post_comment() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_autor uuid;
+  v_nombre text;
+begin
+  select author_id into v_autor from public.posts where id = new.post_id;
+  if v_autor is null or v_autor = new.author_id then return new; end if;
+  select split_part(btrim(display_name), ' ', 1) into v_nombre from public.profiles where id = new.author_id;
+  perform public.notify(v_autor, 'sistema', '💬 ' || coalesce(v_nombre, 'Alguien') || ' comentó tu publicación',
+    left(new.body, 80), '/comunidad', jsonb_build_object('post', new.post_id, 'actor', new.author_id, 'kind', 'comment'));
+  return new;
+end $$;
+
+create or replace function public._notify_post_reaction() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare
+  v_autor uuid;
+  v_nombre text;
+begin
+  select author_id into v_autor from public.posts where id = new.post_id;
+  if v_autor is null or v_autor = new.user_id then return new; end if;
+  if exists (select 1 from public.notifications n
+              where n.user_id = v_autor and n.data ->> 'kind' = 'reaction'
+                and n.data ->> 'post' = new.post_id::text and n.data ->> 'actor' = new.user_id::text) then
+    return new;
+  end if;
+  select split_part(btrim(display_name), ' ', 1) into v_nombre from public.profiles where id = new.user_id;
+  perform public.notify(v_autor, 'sistema',
+    case new.reaction when 'love' then '❤️ ' when 'haha' then '😂 ' when 'wow' then '😮 ' when 'clap' then '👏 ' else '👍 ' end
+      || coalesce(v_nombre, 'Alguien') || ' reaccionó a tu publicación',
+    '', '/comunidad', jsonb_build_object('post', new.post_id, 'actor', new.user_id, 'kind', 'reaction'));
+  return new;
+end $$;
+
+drop trigger if exists trg_notify_post_comment on public.post_comments;
+create trigger trg_notify_post_comment after insert on public.post_comments
+  for each row execute function public._notify_post_comment();
+
+drop trigger if exists trg_notify_post_reaction on public.post_likes;
+create trigger trg_notify_post_reaction after insert on public.post_likes
+  for each row execute function public._notify_post_reaction();
+
+-- ── 5. Privilegios de ejecución ─────────────────────────────────────────────
+grant execute on function public.recent_members(int), public.top_connectors(int) to anon, authenticated;
+grant execute on function public.my_connector_status() to authenticated;
+revoke execute on function
+  public._connector_scores(), public._notify_post_comment(), public._notify_post_reaction()
+  from public, anon, authenticated;
+
+-- ACTUALIZACION-005-FIN

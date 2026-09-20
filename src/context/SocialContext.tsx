@@ -12,7 +12,7 @@ import {
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { Propiedad } from "@/types/propiedad";
 import type { Anuncio, Demanda, Gig, Negocio, Notificacion, Vacante, Vehiculo } from "@/types/mercado";
-import type { Conversacion, Post, Solicitud, TipoPost, Usuario } from "@/types/social";
+import type { Conversacion, Post, ReaccionId, Solicitud, TipoPost, Usuario } from "@/types/social";
 import { negocioAAnuncio, propiedadAAnuncio, vehiculoAAnuncio } from "@/lib/anuncios";
 import { MISIONES } from "@/lib/recompensas";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
@@ -98,6 +98,14 @@ interface Sesion {
 
 // ───────────────────────────── Datos crudos ─────────────────────────────
 
+/** Columnas de user_private que lee el propio usuario. */
+interface FilaPrivada {
+  birth_date: string | null;
+  ideal_partner: string | null;
+  ideal_values: string[] | null;
+  ideal_lifestyle: string[] | null;
+}
+
 interface Crudo {
   perfiles: PerfilFila[];
   listings: ListingFila[];
@@ -110,6 +118,8 @@ interface Crudo {
   monedero: MonederoFila | null;
   nacimiento: string | null;
   parejaIdeal: string | null;
+  parejaIdealValores: string[];
+  parejaIdealEstilo: string[];
   swipesListing: { listing_id: string; action: "save" | "pass" }[];
   swipesPersona: { to_user: string }[];
   matches: { user_a: string; user_b: string }[];
@@ -123,10 +133,12 @@ interface Crudo {
   esAdmin: boolean;
 }
 
-const PRIVADO_VACIO: Pick<Crudo, "monedero" | "nacimiento" | "parejaIdeal" | "swipesListing" | "swipesPersona" | "matches" | "amistades" | "notificaciones" | "tarot" | "misiones" | "aplicaciones" | "chats" | "mensajes" | "esAdmin"> = {
+const PRIVADO_VACIO: Pick<Crudo, "monedero" | "nacimiento" | "parejaIdeal" | "parejaIdealValores" | "parejaIdealEstilo" | "swipesListing" | "swipesPersona" | "matches" | "amistades" | "notificaciones" | "tarot" | "misiones" | "aplicaciones" | "chats" | "mensajes" | "esAdmin"> = {
   monedero: null,
   nacimiento: null,
   parejaIdeal: null,
+  parejaIdealValores: [],
+  parejaIdealEstilo: [],
   swipesListing: [],
   swipesPersona: [],
   matches: [],
@@ -150,6 +162,10 @@ const CRUDO_VACIO: Crudo = {
   conteos: {},
   ...PRIVADO_VACIO,
 };
+
+/** Publicaciones que se cargan al arrancar y tamaño de cada lote posterior del muro infinito. */
+const POSTS_INICIALES = 100;
+const LOTE_POSTS = 20;
 
 const upsertId = <T extends { id: string }>(lista: T[], fila: T, alFrente = false): T[] => {
   const i = lista.findIndex((x) => x.id === fila.id);
@@ -233,6 +249,11 @@ interface SocialContextValue {
   publicarPost: (d: DatosPost) => Promise<void>;
   eliminarPost: (id: string) => Promise<void>;
   alternarLikePost: (postId: string) => Promise<void>;
+  /** Fija (o, con null, quita) tu reacción a una publicación. */
+  reaccionarPost: (postId: string, tipo: ReaccionId | null) => Promise<void>;
+  /** Trae del servidor un lote de publicaciones más antiguas (muro infinito). Devuelve si aún quedan más. */
+  cargarMasPosts: () => Promise<boolean>;
+  hayMasPosts: boolean;
   comentarPost: (postId: string, texto: string) => Promise<void>;
   leerNotificaciones: () => void;
 
@@ -270,6 +291,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   const [aviso, setAviso] = useState<string | null>(null);
   const [enLineaIds, setEnLineaIds] = useState<string[]>([]);
   const [escribiendo, setEscribiendo] = useState<Record<string, boolean>>({});
+  const [hayMasPosts, setHayMasPosts] = useState(false);
+  const cargandoPosts = useRef(false);
 
   const uid = sesion.uid;
   const uidRef = useRef<string | null>(null);
@@ -356,7 +379,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       sb.from("profiles").select("*").limit(1000),
       sb.from("listings").select("*").order("created_at", { ascending: false }).limit(500),
       sb.from("jobs").select("*").order("created_at", { ascending: false }).limit(300),
-      sb.from("posts").select("*").order("created_at", { ascending: false }).limit(100),
+      sb.from("posts").select("*").order("created_at", { ascending: false }).limit(POSTS_INICIALES),
       sb.rpc("demand_counts_for_offers"),
     ]);
     const fallo = perfiles.error ?? listings.error ?? jobs.error ?? posts.error;
@@ -373,7 +396,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     const ids = (posts.data ?? []).map((p: PostFila) => p.id);
     const [likes, comentarios] = ids.length
       ? await Promise.all([
-          sb.from("post_likes").select("post_id, user_id").in("post_id", ids),
+          sb.from("post_likes").select("post_id, user_id, reaction").in("post_id", ids),
           sb.from("post_comments").select("*").in("post_id", ids).order("created_at", { ascending: true }),
         ])
       : [{ data: [] as LikeFila[] }, { data: [] as ComentarioFila[] }];
@@ -389,6 +412,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       comentarios: (comentarios.data ?? []) as ComentarioFila[],
       conteos: mapaConteos,
     }));
+    setHayMasPosts((posts.data ?? []).length >= POSTS_INICIALES);
     setHidratado(true);
   }, [parche]);
 
@@ -422,13 +446,15 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     if (!id) return;
     const [p, priv] = await Promise.all([
       supabase().from("profiles").select("*").eq("id", id).maybeSingle(),
-      supabase().from("user_private").select("birth_date, ideal_partner").eq("user_id", id).maybeSingle(),
+      supabase().from("user_private").select("birth_date, ideal_partner, ideal_values, ideal_lifestyle").eq("user_id", id).maybeSingle(),
     ]);
-    const privado = priv.data as { birth_date: string | null; ideal_partner: string | null } | null;
+    const privado = priv.data as FilaPrivada | null;
     parche((prev) => ({
       perfiles: p.data ? upsertId(prev.perfiles, p.data as PerfilFila) : prev.perfiles,
       nacimiento: privado?.birth_date ?? prev.nacimiento,
       parejaIdeal: privado?.ideal_partner ?? prev.parejaIdeal,
+      parejaIdealValores: privado?.ideal_values ?? prev.parejaIdealValores,
+      parejaIdealEstilo: privado?.ideal_lifestyle ?? prev.parejaIdealEstilo,
     }));
   }, [parche]);
 
@@ -436,7 +462,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     const sb = supabase();
     const [monedero, priv, swL, swP, mt, am, no, ta, mi, ap, ch, adm] = await Promise.all([
       sb.from("wallets").select("*").eq("user_id", id).maybeSingle(),
-      sb.from("user_private").select("birth_date, ideal_partner").eq("user_id", id).maybeSingle(),
+      sb.from("user_private").select("birth_date, ideal_partner, ideal_values, ideal_lifestyle").eq("user_id", id).maybeSingle(),
       sb.from("listing_swipes").select("listing_id, action").eq("user_id", id),
       sb.from("person_swipes").select("to_user").eq("from_user", id),
       sb.from("matches").select("user_a, user_b"),
@@ -450,8 +476,10 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     ]);
     parche((prev) => ({
       monedero: (monedero.data as MonederoFila | null) ?? null,
-      nacimiento: (priv.data as { birth_date: string | null; ideal_partner: string | null } | null)?.birth_date ?? null,
-      parejaIdeal: (priv.data as { birth_date: string | null; ideal_partner: string | null } | null)?.ideal_partner ?? null,
+      nacimiento: (priv.data as FilaPrivada | null)?.birth_date ?? null,
+      parejaIdeal: (priv.data as FilaPrivada | null)?.ideal_partner ?? null,
+      parejaIdealValores: (priv.data as FilaPrivada | null)?.ideal_values ?? [],
+      parejaIdealEstilo: (priv.data as FilaPrivada | null)?.ideal_lifestyle ?? [],
       swipesListing: (swL.data ?? []) as Crudo["swipesListing"],
       swipesPersona: (swP.data ?? []) as Crudo["swipesPersona"],
       matches: (mt.data ?? []) as Crudo["matches"],
@@ -525,6 +553,10 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, (p) => {
         const l = p.new as LikeFila;
         parche((prev) => (prev.likes.some((x) => x.post_id === l.post_id && x.user_id === l.user_id) ? {} : { likes: [...prev.likes, l] }));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "post_likes" }, (p) => {
+        const l = p.new as LikeFila;
+        parche((prev) => ({ likes: prev.likes.map((x) => (x.post_id === l.post_id && x.user_id === l.user_id ? { ...x, reaction: l.reaction } : x)) }));
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "post_likes" }, (p) => {
         const l = p.old as Partial<LikeFila>;
@@ -616,8 +648,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
 
   const perfilesMapeados = useMemo(() => {
     const yo = uid;
-    return crudo.perfiles.map((p) => mapearPerfil(p, yo, p.id === yo ? { nacimiento: crudo.nacimiento, parejaIdeal: crudo.parejaIdeal } : undefined));
-  }, [crudo.perfiles, crudo.nacimiento, crudo.parejaIdeal, uid]);
+    return crudo.perfiles.map((p) => mapearPerfil(p, yo, p.id === yo ? { nacimiento: crudo.nacimiento, parejaIdeal: crudo.parejaIdeal, parejaIdealValores: crudo.parejaIdealValores, parejaIdealEstilo: crudo.parejaIdealEstilo } : undefined));
+  }, [crudo.perfiles, crudo.nacimiento, crudo.parejaIdeal, crudo.parejaIdealValores, crudo.parejaIdealEstilo, uid]);
 
   const yoUsuario = useMemo(() => perfilesMapeados.find((p) => p.id === "yo") ?? PERFIL_INVITADO, [perfilesMapeados]);
   const usuarios = useMemo(() => perfilesMapeados.filter((p) => p.id !== "yo"), [perfilesMapeados]);
@@ -1141,6 +1173,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
         if (c.zonas !== undefined) cols.zones = c.zonas;
         if (c.relaciones !== undefined) cols.relations = c.relaciones;
         if (c.estilo !== undefined) cols.lifestyle = c.estilo;
+        if (c.valores !== undefined) cols.core_values = c.valores;
         if ("universidad" in c) cols.university = c.universidad?.trim() || null;
         if ("colegio" in c) cols.school = c.colegio?.trim() || null;
         if ("estatura" in c) cols.height_cm = c.estatura ?? null;
@@ -1168,6 +1201,14 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
           const { error } = await supabase().from("user_private").update({ ideal_partner: texto || null }).eq("user_id", yo);
           if (error) throw error;
           parche(() => ({ parejaIdeal: texto || null }));
+        }
+        if (c.parejaIdealValores !== undefined || c.parejaIdealEstilo !== undefined) {
+          const ideal: { ideal_values?: string[]; ideal_lifestyle?: string[] } = {};
+          if (c.parejaIdealValores !== undefined) ideal.ideal_values = c.parejaIdealValores;
+          if (c.parejaIdealEstilo !== undefined) ideal.ideal_lifestyle = c.parejaIdealEstilo;
+          const { error } = await supabase().from("user_private").update(ideal).eq("user_id", yo);
+          if (error) throw error;
+          parche((prev) => ({ parejaIdealValores: ideal.ideal_values ?? prev.parejaIdealValores, parejaIdealEstilo: ideal.ideal_lifestyle ?? prev.parejaIdealEstilo }));
         }
         return true;
       });
@@ -1201,26 +1242,77 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     [intentar, parche],
   );
 
-  const alternarLikePost = useCallback(
-    async (postId: string) => {
+  const reaccionarPost = useCallback(
+    async (postId: string, tipo: ReaccionId | null) => {
       const yo = exigirSesion();
       if (!yo) return;
-      const tiene = crudoRef.current.likes.some((l) => l.post_id === postId && l.user_id === yo);
+      const previa = crudoRef.current.likes.find((l) => l.post_id === postId && l.user_id === yo);
+      if (previa ? previa.reaction === tipo : tipo === null) return; // nada que cambiar
+      const esMia = (l: LikeFila) => l.post_id === postId && l.user_id === yo;
       parche((prev) => ({
-        likes: tiene ? prev.likes.filter((l) => !(l.post_id === postId && l.user_id === yo)) : [...prev.likes, { post_id: postId, user_id: yo }],
+        likes: tipo === null ? prev.likes.filter((l) => !esMia(l)) : previa ? prev.likes.map((l) => (esMia(l) ? { ...l, reaction: tipo } : l)) : [...prev.likes, { post_id: postId, user_id: yo, reaction: tipo }],
       }));
-      const { error } = tiene
-        ? await supabase().from("post_likes").delete().eq("post_id", postId).eq("user_id", yo)
-        : await supabase().from("post_likes").insert({ post_id: postId, user_id: yo });
+      const { error } =
+        tipo === null
+          ? await supabase().from("post_likes").delete().eq("post_id", postId).eq("user_id", yo)
+          : previa
+            ? await supabase().from("post_likes").update({ reaction: tipo }).eq("post_id", postId).eq("user_id", yo)
+            : await supabase().from("post_likes").insert({ post_id: postId, user_id: yo, reaction: tipo });
       if (error) {
         parche((prev) => ({
-          likes: tiene ? [...prev.likes, { post_id: postId, user_id: yo }] : prev.likes.filter((l) => !(l.post_id === postId && l.user_id === yo)),
+          likes: previa ? (prev.likes.some(esMia) ? prev.likes.map((l) => (esMia(l) ? previa : l)) : [...prev.likes, previa]) : prev.likes.filter((l) => !esMia(l)),
         }));
         notificarError(mensajeDeError(error));
       }
     },
     [exigirSesion, parche, notificarError],
   );
+
+  /** El «me gusta» de siempre: pone 👍 o, si ya reaccionaste con lo que sea, lo quita. */
+  const alternarLikePost = useCallback(
+    async (postId: string) => {
+      const yo = uidRef.current;
+      const tiene = !!yo && crudoRef.current.likes.some((l) => l.post_id === postId && l.user_id === yo);
+      await reaccionarPost(postId, tiene ? null : "like");
+    },
+    [reaccionarPost],
+  );
+
+  const cargarMasPosts = useCallback(async (): Promise<boolean> => {
+    if (cargandoPosts.current || !haySupabase) return false;
+    cargandoPosts.current = true;
+    try {
+      const cursor = crudoRef.current.posts.reduce<string | null>((min, p) => (min === null || p.created_at < min ? p.created_at : min), null);
+      if (!cursor) {
+        setHayMasPosts(false);
+        return false;
+      }
+      const sb = supabase();
+      const { data, error } = await sb.from("posts").select("*").order("created_at", { ascending: false }).lt("created_at", cursor).limit(LOTE_POSTS);
+      if (error) throw error;
+      const nuevos = (data ?? []) as PostFila[];
+      if (nuevos.length > 0) {
+        const ids = nuevos.map((p) => p.id);
+        const [likes, comentarios] = await Promise.all([
+          sb.from("post_likes").select("post_id, user_id, reaction").in("post_id", ids),
+          sb.from("post_comments").select("*").in("post_id", ids).order("created_at", { ascending: true }),
+        ]);
+        parche((prev) => ({
+          posts: [...prev.posts, ...nuevos.filter((n) => !prev.posts.some((p) => p.id === n.id))],
+          likes: [...prev.likes, ...((likes.data ?? []) as LikeFila[]).filter((l) => !prev.likes.some((x) => x.post_id === l.post_id && x.user_id === l.user_id))],
+          comentarios: [...prev.comentarios, ...((comentarios.data ?? []) as ComentarioFila[]).filter((c) => !prev.comentarios.some((x) => x.id === c.id))],
+        }));
+      }
+      const quedan = nuevos.length === LOTE_POSTS;
+      setHayMasPosts(quedan);
+      return quedan;
+    } catch (e) {
+      notificarError(mensajeDeError(e));
+      return false;
+    } finally {
+      cargandoPosts.current = false;
+    }
+  }, [parche, notificarError]);
 
   const comentarPost = useCallback(
     async (postId: string, texto: string) => {
@@ -1421,6 +1513,9 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       publicarPost,
       eliminarPost,
       alternarLikePost,
+      reaccionarPost,
+      cargarMasPosts,
+      hayMasPosts,
       comentarPost,
       leerNotificaciones,
       checkin,
@@ -1443,7 +1538,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     cerrarSesion, pasarAnuncio, alternarGuardada, conectarAnuncio, eliminarListing, publicarPropiedad, publicarVehiculo, publicarNegocio, publicarDemanda,
     pasarPersona, likePersona, superLikePersona, solicitarAmistad, responderSolicitud, abrirChatDirecto, cargarChat, suscribirEscritura, avisarEscribiendo,
     enviarMensaje, hacerOferta, enviarCotizacion, responderOferta, leer, contratarServicio, postularVacante, publicarServicio, publicarVacante,
-    editarPerfil, publicarPost, eliminarPost, alternarLikePost, comentarPost, leerNotificaciones, checkin, girarRuleta, canjearBoost,
+    editarPerfil, publicarPost, eliminarPost, alternarLikePost, reaccionarPost, cargarMasPosts, hayMasPosts, comentarPost, leerNotificaciones, checkin, girarRuleta, canjearBoost,
     canjearSuperLikes, canjearTirada, reclamarMision, sacarCartaDelDia, hacerTiradaPremium, enviarKyc, reiniciar,
     completarOnboarding, recargarPerfilPropio, recargarMonedero,
   ]);

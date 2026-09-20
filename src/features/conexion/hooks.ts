@@ -36,13 +36,50 @@ export interface FiltrosGaleria {
 
 export const FILTROS_VACIOS: FiltrosGaleria = { edadMin: null, edadMax: null, alturaMin: null, alturaMax: null };
 
+/** Afinidad por dimensión (0–100). null = sin información suficiente de alguno de los dos lados (no es un 0 %). */
+export interface DesgloseAfinidad {
+  valores: number | null;
+  estilo: number | null;
+  relacion: number | null;
+}
+
 export interface Recomendacion {
   id: string;
   puntaje: number;
   motivos: string[];
+  desglose: DesgloseAfinidad;
 }
 
+interface FilaRecomendacion {
+  person_id: string;
+  score: number;
+  reasons: string[] | null;
+  pct_values: number | null;
+  pct_lifestyle: number | null;
+  pct_relation: number | null;
+}
+
+const aRecomendacion = (r: FilaRecomendacion): Recomendacion => ({
+  id: r.person_id,
+  puntaje: r.score,
+  motivos: r.reasons ?? [],
+  desglose: { valores: r.pct_values, estilo: r.pct_lifestyle, relacion: r.pct_relation },
+});
+
 const TAM_PAGINA = 24;
+
+/** Una página de recomendaciones ordenadas por afinidad (la única llamada al motor; la comparten /explorar y /citas). */
+async function pedirRecomendaciones(f: FiltrosGaleria, limite: number, offset: number) {
+  const { data, error } = await supabase().rpc("recommend_people", {
+    p_min_age: f.edadMin,
+    p_max_age: f.edadMax,
+    p_min_height: f.alturaMin,
+    p_max_height: f.alturaMax,
+    p_limit: limite,
+    p_offset: offset,
+  });
+  return { filas: ((data ?? []) as FilaRecomendacion[]).map(aRecomendacion), error: error?.message ?? null };
+}
 
 /** Pide al servidor las personas ordenadas por compatibilidad, aplicando los filtros (con antirrebote). */
 export function useRecomendaciones(f: FiltrosGaleria) {
@@ -58,22 +95,14 @@ export function useRecomendaciones(f: FiltrosGaleria) {
     async (offset: number) => {
       const n = ++pedido.current;
       setCargando(true);
-      const { data, error: err } = await supabase().rpc("recommend_people", {
-        p_min_age: f.edadMin,
-        p_max_age: f.edadMax,
-        p_min_height: f.alturaMin,
-        p_max_height: f.alturaMax,
-        p_limit: TAM_PAGINA,
-        p_offset: offset,
-      });
+      const { filas, error: err } = await pedirRecomendaciones(f, TAM_PAGINA, offset);
       if (n !== pedido.current) return; // llegó una respuesta más nueva
       if (err) {
-        setError(err.message);
+        setError(err);
         setCargando(false);
         return;
       }
       setError(null);
-      const filas = ((data ?? []) as { person_id: string; score: number; reasons: string[] }[]).map((r) => ({ id: r.person_id, puntaje: r.score, motivos: r.reasons ?? [] }));
       setItems((prev) => (offset === 0 ? filas : [...prev, ...filas]));
       setHayMas(filas.length === TAM_PAGINA);
       setCargando(false);
@@ -89,6 +118,23 @@ export function useRecomendaciones(f: FiltrosGaleria) {
   }, [hidratado, sesion.uid, pedir]);
 
   return { items, cargando, hayMas, error, masResultados: () => pedir(items.length) };
+}
+
+/** Afinidad con las 60 personas que mejor encajan contigo (id → recomendación), para tarjetas que no paginan, como /citas. */
+export function useAfinidades() {
+  const { sesion, hidratado } = useSocial();
+  const [mapa, setMapa] = useState<Map<string, Recomendacion>>(new Map());
+  useEffect(() => {
+    if (!hidratado || !sesion.uid || !haySupabase) return;
+    let vivo = true;
+    void pedirRecomendaciones(FILTROS_VACIOS, 60, 0).then(({ filas, error }) => {
+      if (vivo && !error) setMapa(new Map(filas.map((r) => [r.id, r])));
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [hidratado, sesion.uid]);
+  return mapa;
 }
 
 /** Lo que hay esperándote (likes sin responder, gente nueva). */

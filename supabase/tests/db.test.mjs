@@ -822,7 +822,7 @@ await test("Persona Engine: seed_personas.sql crea 5 personas de Ecuador complet
   const emilia = rec.find((r) => r.person_id === ids[0]), seb = rec.find((r) => r.person_id === ids[3]);
   assert.ok(emilia && seb, "las personas de Ecuador aparecen en las recomendaciones");
   assert.ok(emilia.reasons.includes("Comparten universidad") && emilia.reasons.includes("Fueron al mismo colegio"), emilia.reasons.join("|"));
-  assert.ok(emilia.score >= 40, `emilia=${emilia.score}`);
+  assert.ok(emilia.score >= 30, `emilia=${emilia.score}`); // sin valores ni estilo marcados por la visitante, solo texto, formación y zona
   assert.ok(["liked", "match"].includes((await como(invitada, "select public.swipe_person($1, 'like') r", [ids[0]]))[0].r.result)); // las personas demo corresponden 2 de cada 3 likes
   // Sin colisión de usuario: si una persona real ya tiene ese @usuario, el seed no falla ni lo pisa.
   const real = await nuevoUsuario("UsuarioReal");
@@ -899,8 +899,8 @@ await test("recommend_people: ordena por compatibilidad (pareja ideal + universi
   const a = r.find((x) => x.person_id === afin);
   assert.ok(a, "falta el candidato afín");
   assert.equal(r[0].person_id, afin, "el más afín va primero");
-  assert.ok(a.score >= 45 && a.score <= 100, `afín=${a.score}`);
-  assert.ok(a.score >= r[1].score + 20, "se distingue claramente del resto");
+  assert.ok(a.score >= 30 && a.score <= 100, `afín=${a.score}`);
+  assert.ok(a.score >= r[1].score + 10, `se distingue claramente del resto: afín=${a.score}, siguiente=${r[1].score}`);
   assert.ok(a.reasons.some((m) => /pareja ideal/.test(m)) && a.reasons.includes("Comparten universidad") && a.reasons.includes("Intereses en común"), a.reasons.join("|"));
   assert.ok(!r.some((x) => x.person_id === yo3), "no debe recomendarse a sí mismo");
   const [l] = (await como(yo3, "select * from public.recommend_people(p_min_age => 44, p_max_age => 46, p_min_height => 155, p_max_height => 160)")).filter((x) => x.person_id === lejano);
@@ -929,8 +929,80 @@ await test("la descripción de la pareja ideal es privada (solo su dueña o due�
   assert.equal((await como(afin, "select ideal_partner from public.user_private where user_id = $1", [yo3])).length, 0);
   assert.match((await como(yo3, "select ideal_partner from public.user_private where user_id = $1", [yo3]))[0].ideal_partner, /viajar/);
   const cols = (await como(yo3, "select * from public.recommend_people(p_limit => 1)"))[0];
-  assert.deepEqual(Object.keys(cols).sort(), ["person_id", "reasons", "score"]);
+  assert.deepEqual(Object.keys(cols).sort(), ["pct_lifestyle", "pct_relation", "pct_values", "person_id", "reasons", "score"]);
   await falla(como(yo3, "select public._lex('x')"), /permission denied/);
+});
+// ── Pareja ideal estructurada (update_004): valores, estilo de vida y tipo de relación ──
+// Con 200 personas de relleno ya cargadas hay más de 60 candidatos: se aisla a estos perfiles por su estatura (170 cm; el relleno no tiene estatura).
+const buscadora = await nuevoUsuario("Buscadora");
+const gemela = await nuevoUsuario("Gemela");
+const opuesta = await nuevoUsuario("Opuesta");
+const sinDatos = await nuevoUsuario("SinDatos");
+for (const [uid, edad] of [[buscadora, 33], [gemela, 34], [opuesta, 35], [sinDatos, 36]]) await perfilListo(uid, { edad, altura: 170, bio: "Perfil de prueba estructurada", uni: "U Aparte " + edad, colegio: "C Aparte " + edad });
+await q("update public.profiles set core_values = '{Honestidad,Familia}', lifestyle = '{Deportista,Viajero}', relations = '{pareja}' where id = $1", [buscadora]);
+await q("update public.user_private set ideal_values = '{Familia,Lealtad}', ideal_lifestyle = '{Casera,Viajero}' where user_id = $1", [buscadora]);
+// Gemela: tiene lo que busca la buscadora (con otro género gramatical: «Casero» ≙ «Casera») y busca lo que la buscadora es.
+await q("update public.profiles set core_values = '{Familia,Lealtad}', lifestyle = '{Casero,Viajero}', relations = '{pareja,amistad}' where id = $1", [gemela]);
+await q("update public.user_private set ideal_values = '{Honestidad,Familia}', ideal_lifestyle = '{Deportista,Viajero}' where user_id = $1", [gemela]);
+await q("update public.profiles set core_values = '{Ambición,Aventura}', lifestyle = '{Gamer}', relations = '{socios}' where id = $1", [opuesta]);
+await test("pareja ideal estructurada: el motor devuelve el % por valores, estilo de vida y tipo de relación", async () => {
+  const r = await como(buscadora, "select * from public.recommend_people(p_min_height => 170, p_max_height => 170, p_limit => 60)");
+  const g = r.find((x) => x.person_id === gemela), o = r.find((x) => x.person_id === opuesta);
+  // Valores y estilo: la gemela tiene todo lo que busca la buscadora y viceversa (100). Relación: la buscadora quiere «pareja» y la gemela la ofrece, pero la gemela
+  // también busca «amistad», que la buscadora no marca: 0,7 × 1 + 0,3 × 0,5 = 85.
+  assert.deepEqual([g.pct_values, g.pct_lifestyle, g.pct_relation], [100, 100, 85], JSON.stringify(g));
+  assert.deepEqual([o.pct_values, o.pct_lifestyle, o.pct_relation], [0, 0, 0], JSON.stringify(o));
+  assert.ok(g.reasons.includes("Valores afines") && g.reasons.includes("Estilo de vida afín") && g.reasons.includes("Buscan lo mismo"), g.reasons.join("|"));
+  assert.ok(!o.reasons.includes("Valores afines") && !o.reasons.includes("Buscan lo mismo"));
+  assert.ok(g.score >= o.score + 30, `gemela=${g.score} opuesta=${o.score}`);
+  assert.ok(g.score <= 100 && r.indexOf(g) < r.indexOf(o), "el más afín va antes");
+});
+await test("pareja ideal estructurada: mezcla 70 % lo que buscas y 30 % la reciprocidad", async () => {
+  // La buscadora quiere {Familia, Lealtad}; a Gemela le basta con Familia: 1 de 2 = 50 %. Ella busca {Honestidad, Familia} y la buscadora tiene ambos: 100 %.
+  await q("update public.profiles set core_values = '{Familia}' where id = $1", [gemela]);
+  const g = (await como(buscadora, "select * from public.recommend_people(p_min_height => 170, p_max_height => 170, p_limit => 60)")).find((x) => x.person_id === gemela);
+  assert.equal(g.pct_values, Math.round(100 * (0.7 * 0.5 + 0.3 * 1)), JSON.stringify(g)); // 65
+  await q("update public.profiles set core_values = '{Familia,Lealtad}' where id = $1", [gemela]);
+});
+await test("pareja ideal estructurada: sin datos suficientes el porcentaje es NULL (no un 0 % engañoso) y no suma puntos", async () => {
+  const s = (await como(buscadora, "select * from public.recommend_people(p_min_height => 170, p_max_height => 170, p_limit => 60)")).find((x) => x.person_id === sinDatos);
+  assert.deepEqual([s.pct_values, s.pct_lifestyle, s.pct_relation], [null, null, null], JSON.stringify(s));
+  const desdeSinDatos = (await como(sinDatos, "select * from public.recommend_people(p_min_height => 170, p_max_height => 170, p_limit => 60)")).find((x) => x.person_id === gemela);
+  assert.equal(desdeSinDatos.pct_values, null, "sin valores propios ni buscados no hay con qué comparar");
+  // Quien no indicó qué busca se compara con lo que ya es: la afinidad por parecido rellena los huecos.
+  await q("update public.profiles set core_values = '{Familia,Lealtad}', lifestyle = '{Viajero}' where id = $1", [sinDatos]);
+  const parecido = (await como(sinDatos, "select * from public.recommend_people(p_min_height => 170, p_max_height => 170, p_limit => 60)")).find((x) => x.person_id === gemela);
+  // Compara lo que él ya es con lo que la gemela tiene (100) y, por reciprocidad, lo que ella busca ({Honestidad, Familia}) con lo que él es (1 de 2): 0,7 + 0,15 = 85.
+  assert.deepEqual([parecido.pct_values, parecido.pct_lifestyle], [85, 85], JSON.stringify(parecido));
+});
+await test("pareja ideal estructurada: lo que buscas es privado; los valores propios son públicos", async () => {
+  assert.equal((await como(gemela, "select ideal_values from public.user_private where user_id = $1", [buscadora])).length, 0);
+  assert.deepEqual((await como(buscadora, "select ideal_values, ideal_lifestyle from public.user_private where user_id = $1", [buscadora]))[0], { ideal_values: ["Familia", "Lealtad"], ideal_lifestyle: ["Casera", "Viajero"] });
+  assert.deepEqual((await como(null, "select core_values from public.profiles where id = $1", [gemela]))[0].core_values, ["Familia", "Lealtad"]);
+  await falla(como(gemela, "select public._afinidad('{a}', '{a}', '{a}', '{a}')"), /permission denied/);
+  await falla(como(gemela, "select public._tags('{a}')"), /permission denied/);
+});
+await test("pareja ideal estructurada: solo el dueño la edita y se validan los límites", async () => {
+  await como(buscadora, "update public.user_private set ideal_values = '{A,B,C}', ideal_lifestyle = '{X}' where user_id = $1", [buscadora]);
+  await como(buscadora, "update public.profiles set core_values = '{Fe}' where id = $1", [buscadora]);
+  assert.equal((await como(gemela, "update public.user_private set ideal_values = '{Hack}' where user_id = $1 returning user_id", [buscadora])).length, 0);
+  assert.equal((await como(gemela, "update public.profiles set core_values = '{Hack}' where id = $1 returning id", [buscadora])).length, 0);
+  await falla(como(buscadora, "update public.profiles set core_values = '{a,b,c,d,e,f,g,h,i}' where id = $1", [buscadora]), /core_values|check/);
+  await falla(como(buscadora, "update public.user_private set ideal_lifestyle = array_fill('x'::text, array[9]) where user_id = $1", [buscadora]), /ideal_lifestyle|check/);
+  await q("update public.user_private set ideal_values = '{Familia,Lealtad}', ideal_lifestyle = '{Casera,Viajero}' where user_id = $1", [buscadora]);
+  await q("update public.profiles set core_values = '{Honestidad,Familia}' where id = $1", [buscadora]);
+});
+await test("recommend_people: un perfil espejo alcanza casi el 100 % con las tres dimensiones al 100", async () => {
+  // Perfil «espejo»: mismo texto, universidad, colegio, intereses, zona, valores, estilo y relación.
+  const yoE = await nuevoUsuario("YoEspejo"), elE = await nuevoUsuario("ElEspejo");
+  for (const uid of [yoE, elE]) {
+    await perfilListo(uid, { edad: 30, altura: 170, bio: "Amante del senderismo y la cocina casera", uni: "Espejo U", colegio: "Espejo C", intereses: ["amigos", "roomie"], zonas: ["Centro"] });
+    await q("update public.profiles set core_values = '{Familia,Fe}', lifestyle = '{Viajero}', relations = '{pareja}', sign = 'aries' where id = $1", [uid]);
+    await q("update public.user_private set ideal_partner = 'Persona amante del senderismo y la cocina casera', ideal_values = '{Familia,Fe}', ideal_lifestyle = '{Viajero}' where user_id = $1", [uid]);
+  }
+  const e = (await como(yoE, "select * from public.recommend_people(p_min_height => 170, p_max_height => 170, p_limit => 60)")).find((x) => x.person_id === elE);
+  assert.deepEqual([e.pct_values, e.pct_lifestyle, e.pct_relation], [100, 100, 100]);
+  assert.ok(e.score >= 90 && e.score <= 100, `espejo=${e.score}`);
 });
 await test("los campos académicos: se editan solo en el propio perfil y respetan sus rangos", async () => {
   await como(yo3, "update public.profiles set university = 'U Nueva', school = 'Colegio Nuevo', height_cm = 171 where id = $1", [yo3]);
@@ -1043,6 +1115,239 @@ await test("MIGRACIÓN: update_003 sobre una base con 002 (dos veces) rellena c�
     assert.deepEqual(filas.map((f) => f.onboarding_completed), [ "posterior", "previo1", "previo2" ].map((n) => n === "previo1"));
     const fns = (await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in ('recommend_people','apply_referral','referral_stats','claim_daily_challenge','daily_challenges_status','community_stats','opportunity_snapshot','referral_leaderboard')")).rows[0].n;
     assert.equal(fns, 8);
+  } finally {
+    await m.end();
+  }
+});
+
+await test("MIGRACIÓN: update_004 sobre una base con 003 (dos veces) conserva perfiles y datos privados, y el motor sigue respondiendo", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-004-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-004-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 004 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_004_pareja_ideal.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_004 difieren");
+  await server.createDatabase("migracion4");
+  const m = new pg.Client({ ...conn, database: "migracion4" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 + 003
+    await m.query("insert into auth.users (id, email) values (gen_random_uuid(), 'a@test.dev'), (gen_random_uuid(), 'b@test.dev')");
+    await m.query("update public.profiles set onboarding_completed = true, age = 30, bio = 'Bio previa', interests = '{amigos}' where true");
+    await m.query("update public.user_private set ideal_partner = 'Alguien alegre y sincero con ganas de crecer' where true");
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    const p = (await m.query("select core_values, bio from public.profiles order by id limit 1")).rows[0];
+    assert.deepEqual(p.core_values, [], "los perfiles previos quedan con valores vacíos");
+    assert.equal(p.bio, "Bio previa");
+    const u = (await m.query("select ideal_values, ideal_lifestyle, ideal_partner from public.user_private limit 1")).rows[0];
+    assert.deepEqual([u.ideal_values, u.ideal_lifestyle], [[], []]);
+    assert.match(u.ideal_partner, /alegre/, "el texto de la pareja ideal se conserva");
+    const [a] = (await m.query("select id from public.profiles order by id limit 1")).rows;
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: a.id, role: "authenticated" })]);
+    const rec = (await m.query("select * from public.recommend_people()")).rows;
+    await m.query("rollback");
+    assert.equal(rec.length, 1);
+    assert.deepEqual([rec[0].pct_values, rec[0].pct_lifestyle, rec[0].pct_relation], [null, null, null]);
+    const fns = (await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in ('recommend_people','_tags','_cobertura','_afinidad')")).rows[0].n;
+    assert.equal(fns, 4, "una sola recommend_people (la antigua se elimina) más las tres piezas del cálculo");
+  } finally {
+    await m.end();
+  }
+});
+
+// ── 7d. Comunidad viva (update_005): reacciones, avisos, miembros recientes y Top Conectores ──
+console.log("\nComunidad viva: reacciones, avisos, miembros recientes y Top Conectores");
+const { puntosDeActividad } = await import("@/lib/comunidad");
+/** Persona real con el perfil completo, en «Cuenca · Centro». */
+const miembroReal = async (nombre) => {
+  const id = await nuevoUsuario(nombre);
+  await q("update public.profiles set onboarding_completed = true, location = 'Cuenca · Centro' where id = $1", [id]);
+  return id;
+};
+const publicarPosts = async (autor, n = 1, cuerpo = "Publicación de prueba") =>
+  (await q("insert into public.posts (author_id, kind, body) select $1, 'historia', $2 || ' ' || g from generate_series(1, $3::int) g returning id", [autor, cuerpo, n])).map((r) => r.id);
+
+const autora = await miembroReal("Autora");
+const lectora = await miembroReal("Lectora");
+const [postA] = await publicarPosts(autora);
+await test("reacciones: por defecto «like»; solo su dueña o dueño la cambia; solo valores válidos y sin duplicar", async () => {
+  await como(lectora, "insert into public.post_likes (post_id, user_id) values ($1, $2)", [postA, lectora]);
+  const reaccion = async () => (await q("select reaction from public.post_likes where post_id = $1 and user_id = $2", [postA, lectora]))[0].reaction;
+  assert.equal(await reaccion(), "like");
+  await como(lectora, "update public.post_likes set reaction = 'love' where post_id = $1 and user_id = $2", [postA, lectora]);
+  assert.equal(await reaccion(), "love");
+  assert.equal((await como(autora, "update public.post_likes set reaction = 'haha' where post_id = $1 and user_id = $2 returning user_id", [postA, lectora])).length, 0, "nadie más puede cambiarla");
+  assert.equal(await reaccion(), "love");
+  await falla(como(lectora, "update public.post_likes set reaction = 'ira' where post_id = $1 and user_id = $2", [postA, lectora]), /reaction|check/);
+  await falla(como(lectora, "update public.post_likes set user_id = $2 where post_id = $1 and user_id = $2", [postA, autora]), /permission denied/);
+  await falla(como(lectora, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'wow')", [postA, lectora]), /duplicate|unique/);
+  await falla(como(lectora, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'wow')", [postA, autora]), /row-level security/);
+  await como(lectora, "delete from public.post_likes where post_id = $1 and user_id = $2", [postA, lectora]);
+  await como(lectora, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'clap')", [postA, lectora]);
+  assert.equal(await reaccion(), "clap");
+});
+
+const comentarista = await miembroReal("Comentarista");
+const [postB] = await publicarPosts(autora, 1, "Otra publicación");
+const avisosDe = (uid, post) => q("select type, title, body, href, data, read_at from public.notifications where user_id = $1 and data ->> 'post' = $2 order by created_at", [uid, post]);
+await test("avisos: comentar o reaccionar avisa al autor una sola vez; las acciones sobre lo propio no avisan", async () => {
+  await como(comentarista, "insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Me encantó tu historia, gracias por compartirla')", [postB, comentarista]);
+  let a = await avisosDe(autora, postB);
+  assert.equal(a.length, 1);
+  assert.equal(a[0].type, "sistema");
+  assert.match(a[0].title, /💬 Comentarista comentó tu publicación/);
+  assert.equal(a[0].body, "Me encantó tu historia, gracias por compartirla");
+  assert.equal(a[0].href, "/comunidad");
+  assert.equal(a[0].read_at, null);
+  await como(comentarista, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'love')", [postB, comentarista]);
+  a = await avisosDe(autora, postB);
+  assert.equal(a.length, 2);
+  assert.match(a[1].title, /❤️ Comentarista reaccionó a tu publicación/);
+  // Cambiar o quitar y volver a poner la reacción no duplica el aviso.
+  await como(comentarista, "update public.post_likes set reaction = 'wow' where post_id = $1 and user_id = $2", [postB, comentarista]);
+  await como(comentarista, "delete from public.post_likes where post_id = $1 and user_id = $2", [postB, comentarista]);
+  await como(comentarista, "insert into public.post_likes (post_id, user_id) values ($1, $2)", [postB, comentarista]);
+  assert.equal((await avisosDe(autora, postB)).length, 2);
+  // Lo propio no avisa; y el aviso llega solo al autor.
+  await como(autora, "insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Gracias')", [postB, autora]);
+  await como(autora, "insert into public.post_likes (post_id, user_id) values ($1, $2)", [postB, autora]);
+  assert.equal((await avisosDe(autora, postB)).length, 2);
+  assert.equal((await avisosDe(comentarista, postB)).length, 0);
+});
+
+const recienLlegada = await miembroReal("Sofía Recién Llegada");
+const demoNueva = await miembroReal("Demo Reciente");
+const sinTerminar = await nuevoUsuario("SinTerminar");
+await q("update public.profiles set is_demo = true where id = $1", [demoNueva]);
+await q("update public.profiles set created_at = now() + interval '2 hours' where id = $1", [recienLlegada]);
+await q("update public.profiles set created_at = now() + interval '3 hours' where id = any($1)", [[demoNueva, sinTerminar]]);
+await test("recent_members: solo personas reales con perfil completo, lo mínimo (nombre de pila y ciudad), más recientes primero, público", async () => {
+  const r = await como(null, "select * from public.recent_members(30)");
+  assert.deepEqual(Object.keys(r[0]).sort(), ["avatar_url", "city", "first_name", "joined_at", "member_id"]);
+  assert.equal(r[0].member_id, recienLlegada, "la más reciente va primero");
+  assert.equal(r[0].first_name, "Sofía", "solo el nombre de pila");
+  assert.equal(r[0].city, "Cuenca", "solo la ciudad, no el barrio");
+  const ids = r.map((x) => x.member_id);
+  assert.ok(!ids.includes(demoNueva) && !ids.includes(sinTerminar), "ni perfiles demo ni perfiles sin terminar");
+  assert.ok(r.every((x, i) => i === 0 || new Date(r[i - 1].joined_at) >= new Date(x.joined_at)), "orden descendente");
+  assert.equal((await como(null, "select * from public.recent_members(1)")).length, 1);
+  assert.ok((await como(null, "select * from public.recent_members(9999)")).length <= 30, "tope de 30");
+});
+
+// Actividad conocida de «Estrella»: 12 publicaciones (tope 30), 24 reacciones, 3 comentarios recibidos, 2 hechos y 1 match.
+const estrella = await miembroReal("Estrella");
+const fans = [await miembroReal("Fan1"), await miembroReal("Fan2"), await miembroReal("Fan3"), await miembroReal("Fan4")];
+const postsEstrella = await publicarPosts(estrella, 12, "Post de Estrella");
+for (const p of postsEstrella.slice(0, 6)) for (const f of fans) await q("insert into public.post_likes (post_id, user_id) values ($1, $2)", [p, f]);
+for (const p of postsEstrella.slice(0, 3)) await q("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Muy bueno')", [p, fans[0]]);
+const [postFan] = await publicarPosts(fans[0], 1, "Post de Fan1");
+for (let i = 0; i < 2; i++) await q("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Gracias por compartir')", [postFan, estrella]);
+await q("insert into public.post_likes (post_id, user_id) values ($1, $2)", [postsEstrella[6], estrella]);            // sobre lo propio: no cuenta
+await q("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Comento lo mío')", [postsEstrella[6], estrella]); // ídem
+await q("insert into public.matches (user_a, user_b) values (least($1::uuid, $2::uuid), greatest($1::uuid, $2::uuid))", [estrella, fans[0]]);
+const puntosSql = async (uid) => (await q("select score from public._connector_scores() where user_id = $1", [uid]))[0]?.score ?? 0;
+await test("PARIDAD: los puntos de actividad en SQL == puntosDeActividad() en TypeScript (con topes y sin contar lo propio)", async () => {
+  const esperado = puntosDeActividad({ publicaciones: 12, reaccionesRecibidas: 24, comentariosRecibidos: 3, comentariosHechos: 2, invitados: 0, matches: 1 });
+  assert.equal(esperado, 30 + 24 + 6 + 2 + 0 + 2);
+  assert.equal(await puntosSql(estrella), esperado);
+  // Fan1: 1 publicación (3) + 3 comentarios hechos (3) + 2 recibidos (4) + 1 match (2)
+  assert.equal(await puntosSql(fans[0]), puntosDeActividad({ publicaciones: 1, reaccionesRecibidas: 0, comentariosRecibidos: 2, comentariosHechos: 3, invitados: 0, matches: 1 }));
+  // Topes: 40 publicaciones siguen sumando 30.
+  const insistente = await miembroReal("Insistente");
+  await publicarPosts(insistente, 40);
+  assert.equal(await puntosSql(insistente), 30);
+  assert.equal(puntosDeActividad({ publicaciones: 40, reaccionesRecibidas: 500, comentariosRecibidos: 500, comentariosHechos: 500, invitados: 500, matches: 500 }), 30 + 50 + 40 + 20 + 100 + 20);
+});
+await test("la actividad de hace más de 30 días no cuenta", async () => {
+  const antigua = await miembroReal("Antigua");
+  await publicarPosts(antigua, 5);
+  assert.equal(await puntosSql(antigua), 15);
+  await q("update public.posts set created_at = now() - interval '31 days' where author_id = $1", [antigua]);
+  assert.equal(await puntosSql(antigua), 0);
+});
+
+const medio = await miembroReal("Medio");
+const pobre = await miembroReal("Pobre");
+const famosoDemo = await miembroReal("FamosoDemo");
+const famosoSinTerminar = await nuevoUsuario("FamosoSinTerminar");
+await publicarPosts(medio, 3);
+await q("insert into public.post_likes (post_id, user_id) select id, $2 from public.posts where author_id = $1 limit 1", [medio, lectora]); // 9 + 1 = 10
+await publicarPosts(pobre, 3); // 9: no llega
+await q("update public.profiles set is_demo = true where id = $1", [famosoDemo]);
+await publicarPosts(famosoDemo, 12);
+await publicarPosts(famosoSinTerminar, 12);
+await test("top_connectors: solo con ≥ 10 puntos, sin perfiles demo ni sin terminar, ordenado, con puesto y público", async () => {
+  const r = await como(null, "select * from public.top_connectors(25)");
+  assert.deepEqual(Object.keys(r[0]).sort(), ["avatar_url", "city", "display_name", "person_id", "rank", "score"]);
+  const por = (id) => r.find((x) => x.person_id === id);
+  assert.equal(por(estrella).score, 64);
+  assert.equal(por(estrella).rank, 1);
+  assert.equal(por(medio)?.score, 10, "10 puntos justos entran");
+  assert.equal(por(pobre), undefined, "9 puntos no");
+  assert.equal(por(famosoDemo), undefined, "los perfiles demo no participan");
+  assert.equal(por(famosoSinTerminar), undefined);
+  assert.ok(r.every((x) => x.score >= 10) && r.every((x, i) => i === 0 || r[i - 1].score >= x.score), "ordenado de mayor a menor");
+  assert.equal(por(estrella).city, "Cuenca");
+  assert.equal((await como(null, "select * from public.top_connectors(2)")).length, 2);
+});
+await test("my_connector_status: tu puntaje, puesto y lo que falta; exige sesión", async () => {
+  const e = (await como(estrella, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([e.score, e.rank, e.is_top], [64, 1, true]);
+  const p = (await como(pobre, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([p.score, p.is_top, p.threshold], [9, false, 10], "con menos de 10 personas en el ranking bastan 10 puntos");
+  const nada = (await como(sinTerminar, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([nada.score, nada.rank, nada.is_top], [0, null, false]);
+  await falla(como(null, "select public.my_connector_status()"), /permission denied|No autenticado/);
+  await falla(como(estrella, "select * from public._connector_scores()"), /permission denied/);
+});
+await test("con el ranking lleno el umbral pasa a ser el puntaje del décimo puesto", async () => {
+  const lleno = [];
+  for (let i = 0; i < 10; i++) {
+    const u = await miembroReal(`Cima${i}`);
+    await publicarPosts(u, 10); // 30 puntos cada una
+    lleno.push(u);
+  }
+  const p = (await como(pobre, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([p.is_top, p.threshold], [false, 30]);
+  const top = await como(null, "select * from public.top_connectors(10)");
+  assert.equal(top.length, 10);
+  assert.ok(top.every((x) => x.score >= 30), "solo entran los 10 mejores");
+  await q("delete from auth.users where id = any($1)", [lleno]);
+});
+
+await test("MIGRACIÓN: update_005 sobre una base con 004 (dos veces) conserva los «me gusta» como reacción «like» y activa avisos y ranking", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-005-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-005-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 005 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_005_comunidad_viva.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_005 difieren");
+  await server.createDatabase("migracion5");
+  const m = new pg.Client({ ...conn, database: "migracion5" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 + 003 + 004
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'autor@test.dev', '{\"full_name\":\"Autor Previo\"}'), (gen_random_uuid(), 'fan@test.dev', '{\"full_name\":\"Fan Previo\"}')");
+    const [autor, fan] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    const post = (await m.query("insert into public.posts (author_id, kind, body) values ($1, 'historia', 'Previa') returning id", [autor])).rows[0].id;
+    await m.query("insert into public.post_likes (post_id, user_id) values ($1, $2)", [post, fan]); // antes de existir la columna reaction
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select reaction from public.post_likes where post_id = $1", [post])).rows[0].reaction, "like");
+    const fns = (await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in ('recent_members','top_connectors','my_connector_status','_connector_scores','_notify_post_comment','_notify_post_reaction')")).rows[0].n;
+    assert.equal(fns, 6);
+    assert.equal((await m.query("select count(*)::int n from pg_trigger where tgname in ('trg_notify_post_comment','trg_notify_post_reaction') and not tgisinternal")).rows[0].n, 2, "una sola vez cada disparador");
+    await m.query("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Después de migrar')", [post, fan]);
+    const avisos = (await m.query("select title from public.notifications where user_id = $1", [autor])).rows;
+    assert.equal(avisos.length, 1, "un solo aviso aunque la migración se ejecutó dos veces");
+    assert.match(avisos[0].title, /Fan comentó tu publicación/);
   } finally {
     await m.end();
   }
@@ -1273,9 +1578,11 @@ await test("las columnas escritas con insert/update literales están concedidas 
     ["posts", "INSERT", ["author_id", "kind", "body", "zone", "image_url"]],
     ["messages", "INSERT", ["chat_id", "sender_id", "kind", "body", "amount", "currency", "days", "status"]],
     ["friendships", "INSERT", ["requester_id", "addressee_id"]],
+    ["post_likes", "INSERT", ["post_id", "user_id", "reaction"]],
+    ["post_likes", "UPDATE", ["reaction"]],
     ["post_comments", "INSERT", ["post_id", "author_id", "body"]],
-    ["profiles", "UPDATE", ["display_name", "handle", "bio", "location", "interests", "zones", "relations", "lifestyle", "budget", "age", "sign", "avatar_url", "professional"]],
-    ["user_private", "UPDATE", ["birth_date"]],
+    ["profiles", "UPDATE", ["display_name", "handle", "bio", "location", "interests", "zones", "relations", "lifestyle", "budget", "age", "sign", "avatar_url", "professional", "core_values", "university", "school", "height_cm"]],
+    ["user_private", "UPDATE", ["birth_date", "ideal_partner", "ideal_values", "ideal_lifestyle"]],
     ["friendships", "UPDATE", ["status"]],
   ];
   for (const [tabla, priv, columnas] of objetivos) for (const c of columnas) assert.ok(grants[`${tabla}:${priv}`]?.has(c), `${tabla}.${c} sin privilegio ${priv}`);

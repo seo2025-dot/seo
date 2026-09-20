@@ -44,6 +44,9 @@ interface Persona {
   colegio?: string;
   estatura?: number;
   parejaIdeal?: string;
+  valores?: string[]; // sus valores (públicos)
+  buscaValores?: string[]; // valores que busca en su pareja (privado)
+  buscaEstilo?: string[]; // estilo de vida que busca en su pareja (privado)
   titular?: string;
   habilidades?: string[];
   fotos?: Foto[];
@@ -74,6 +77,9 @@ const ECUADOR: Omit<Persona, "n">[] = [
     universidad: "Universidad de Cuenca",
     colegio: "Colegio Benigno Malo",
     estatura: 165,
+    valores: ["Honestidad", "Familia", "Creatividad"],
+    buscaValores: ["Honestidad", "Familia", "Estabilidad", "Crecimiento personal"],
+    buscaEstilo: ["Creativo", "Lector", "Casero"],
     titular: "Restauradora de arte y ceramista",
     habilidades: ["Restauración", "Cerámica", "Historia del arte"],
     parejaIdeal:
@@ -93,6 +99,9 @@ const ECUADOR: Omit<Persona, "n">[] = [
     universidad: "Universidad San Francisco de Quito",
     colegio: "Colegio Alemán de Quito",
     estatura: 168,
+    valores: ["Ambición", "Crecimiento personal", "Sostenibilidad"],
+    buscaValores: ["Ambición", "Honestidad", "Crecimiento personal"],
+    buscaEstilo: ["Emprendedor", "Deportista", "Lector"],
     titular: "Fundadora · café de especialidad ecuatoriano",
     habilidades: ["Emprendimiento", "Comercio justo", "Liderazgo"],
     parejaIdeal:
@@ -112,6 +121,9 @@ const ECUADOR: Omit<Persona, "n">[] = [
     universidad: "Universidad Casa Grande",
     colegio: "Colegio Americano de Guayaquil",
     estatura: 163,
+    valores: ["Familia", "Aventura", "Sentido del humor"],
+    buscaValores: ["Crecimiento personal", "Lealtad", "Sentido del humor"],
+    buscaEstilo: ["Deportista", "Viajero", "Familiar"],
     titular: "Coach de liderazgo y voluntaria social",
     habilidades: ["Liderazgo", "Coaching", "Voluntariado"],
     parejaIdeal:
@@ -131,6 +143,9 @@ const ECUADOR: Omit<Persona, "n">[] = [
     universidad: "Universidad de Cuenca",
     colegio: "Colegio Benigno Malo",
     estatura: 178,
+    valores: ["Creatividad", "Fe", "Honestidad"],
+    buscaValores: ["Creatividad", "Honestidad", "Respeto"],
+    buscaEstilo: ["Creativo", "Espiritual", "Casero"],
     titular: "Violinista y docente de música",
     habilidades: ["Violín", "Composición", "Pedagogía musical"],
     parejaIdeal:
@@ -150,6 +165,9 @@ const ECUADOR: Omit<Persona, "n">[] = [
     universidad: "Pontificia Universidad Católica del Ecuador",
     colegio: "Colegio Alemán de Quito",
     estatura: 176,
+    valores: ["Familia", "Estabilidad", "Honestidad"],
+    buscaValores: ["Honestidad", "Familia", "Lealtad"],
+    buscaEstilo: ["Deportista", "Viajero", "Casero"],
     titular: "Ingeniero civil · vivienda accesible",
     habilidades: ["Construcción", "Gestión de proyectos", "Vivienda social"],
     parejaIdeal:
@@ -187,6 +205,9 @@ function comprobar(p: Persona) {
   dentro("universidad", p.universidad, 120, 2);
   dentro("colegio", p.colegio, 120, 2);
   dentro("pareja ideal", p.parejaIdeal, 1000, 20);
+  for (const [campo, l] of [["valores", p.valores], ["valores que busca", p.buscaValores], ["estilo que busca", p.buscaEstilo]] as const) {
+    if (l && l.length > 5) throw new Error(`Persona ${p.n} (${p.nombre}): ${campo} admite como máximo 5`);
+  }
   if (!/^@[a-z0-9_.]{2,40}$/.test(p.usuario)) throw new Error(`Persona ${p.n}: usuario inválido ${p.usuario}`);
   if (p.estatura !== undefined && (p.estatura < 120 || p.estatura > 230)) throw new Error(`Persona ${p.n}: estatura fuera de rango`);
   if ((p.fotos?.length ?? FOTOS_RELLENO) > 10) throw new Error(`Persona ${p.n}: máximo 10 fotos`);
@@ -241,7 +262,7 @@ export function generarSql(cantidad: number): string {
   L.push("-- ============================================================================");
   L.push(`-- PERSONAS SIMULADAS (${cantidad}) — GENERADO por supabase/seed/personas.ts; no lo edites a mano.`);
   L.push("-- Personas 1–5: Cuenca, Quito y Guayaquil, con retrato y escenas de su ciudad. Personas 6+: relleno de pruebas de carga.");
-  L.push("-- Requiere schema.sql con las actualizaciones 002 (fotos) y 003 (universidad, colegio, estatura, pareja ideal).");
+  L.push("-- Requiere schema.sql con las actualizaciones 002 (fotos), 003 (universidad, colegio, estatura, pareja ideal) y 004 (valores y pareja ideal estructurada).");
   L.push("-- Es idempotente y atómico (una sola transacción): si algo falla no queda nada a medias.");
   L.push("-- Son perfiles DEMO: no pueden iniciar sesión. Un administrador puede simularlas en /admin/personas.");
   L.push("--");
@@ -262,12 +283,12 @@ export function generarSql(cantidad: number): string {
     L.push(`insert into auth.users (instance_id, id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, created_at, updated_at, confirmation_token, recovery_token, email_change, email_change_token_new)`);
     L.push(`values ('00000000-0000-0000-0000-000000000000', '${id}', 'authenticated', 'authenticated', ${lit(`demo+persona${p.n}@inmobiliaria.social.invalid`)}, '', now(), '{"provider":"email","providers":["email"]}', ${lit(JSON.stringify({ full_name: p.nombre }))}::jsonb, now(), now(), '', '', '', '')`);
     L.push(`on conflict (id) do nothing;`);
-    L.push(`update public.user_private set birth_date = '${p.nacimiento}', ideal_partner = ${p.parejaIdeal ? lit(p.parejaIdeal) : "null"} where user_id = '${id}';`);
+    L.push(`update public.user_private set birth_date = '${p.nacimiento}', ideal_partner = ${p.parejaIdeal ? lit(p.parejaIdeal) : "null"}, ideal_values = ${arr(p.buscaValores ?? [])}, ideal_lifestyle = ${arr(p.buscaEstilo ?? [])} where user_id = '${id}';`);
     // El @usuario solo cambia si nadie más lo tiene (evita romper la restricción de unicidad si una persona real lo eligió).
     L.push(`update public.profiles set display_name = ${lit(p.nombre)},`);
     L.push(`  handle = case when exists (select 1 from public.profiles o where o.handle = ${lit(p.usuario)} and o.id <> '${id}') then handle else ${lit(p.usuario)} end,`);
     L.push(`  bio = ${lit(p.bio)}, location = ${lit(p.ubicacion)},`);
-    L.push(`  interests = ${arr(p.intereses)}, zones = ${arr(p.zonas)}, relations = ${arr(p.relaciones)}, lifestyle = ${arr(p.estilo)},`);
+    L.push(`  interests = ${arr(p.intereses)}, zones = ${arr(p.zonas)}, relations = ${arr(p.relaciones)}, lifestyle = ${arr(p.estilo)}, core_values = ${arr(p.valores ?? [])},`);
     L.push(`  university = ${p.universidad ? lit(p.universidad) : "null"}, school = ${p.colegio ? lit(p.colegio) : "null"}, height_cm = ${p.estatura ?? "null"},`);
     L.push(`  professional = ${profesional ? `${lit(profesional)}::jsonb` : "null"},`);
     L.push(`  age = ${Math.min(100, Math.max(18, edad))}, sign = ${signo ? lit(signo) : "null"}, avatar_url = ${lit(fotos[0].miniatura)},`);

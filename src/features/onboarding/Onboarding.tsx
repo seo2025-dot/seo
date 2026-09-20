@@ -3,7 +3,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ESTILOS_VIDA, ZONAS } from "@/data/catalogos";
+import { ESTILOS_VIDA, MAX_VALORES, VALORES, ZONAS } from "@/data/catalogos";
+import Chips from "@/components/Chips";
 import { useSocial } from "@/context/SocialContext";
 import GaleriaFotos from "@/features/fotos/GaleriaFotos";
 import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
@@ -30,27 +31,6 @@ function Campo({ id, label, error, children }: { id: string; label: string; erro
           {error}
         </p>
       )}
-    </div>
-  );
-}
-
-function Chips<T extends string>({ opciones, valor, onChange, etiqueta, color }: { opciones: readonly T[]; valor: T[]; onChange: (v: T[]) => void; etiqueta: (o: T) => string; color: string }) {
-  return (
-    <div className="flex flex-wrap gap-2">
-      {opciones.map((o) => {
-        const activo = valor.includes(o);
-        return (
-          <button
-            key={o}
-            type="button"
-            aria-pressed={activo}
-            onClick={() => onChange(activo ? valor.filter((x) => x !== o) : [...valor, o])}
-            className={`rounded-full border px-3 py-1.5 text-xs font-medium transition ${activo ? color : "border-slate-200 hover:border-brand-300"}`}
-          >
-            {etiqueta(o)}
-          </button>
-        );
-      })}
     </div>
   );
 }
@@ -85,6 +65,9 @@ export default function Onboarding() {
       colegio: y.colegio ?? "",
       estatura: y.estatura ? String(y.estatura) : "",
       parejaIdeal: y.parejaIdeal ?? "",
+      valores: y.valores ?? [],
+      parejaIdealValores: y.parejaIdealValores ?? [],
+      parejaIdealEstilo: y.parejaIdealEstilo ?? [],
       intereses: y.intereses,
       zonas: y.zonas,
       relaciones: y.relaciones ?? [],
@@ -152,6 +135,9 @@ export default function Onboarding() {
       colegio: b.colegio.trim(),
       estatura: estaturaCm(b.estatura) ?? undefined,
       parejaIdeal: b.parejaIdeal.trim(),
+      valores: b.valores,
+      parejaIdealValores: b.parejaIdealValores,
+      parejaIdealEstilo: b.parejaIdealEstilo,
       edad: edadDesde(b.nacimiento) ?? undefined,
       intereses: b.intereses,
       zonas: b.zonas,
@@ -277,10 +263,6 @@ export default function Onboarding() {
               {errores.zonas && <p role="alert" className="mt-1 text-xs text-rose-600">{errores.zonas}</p>}
             </fieldset>
             <fieldset>
-              <legend className="mb-2 text-sm font-medium">Tipo de conexión en Citas (opcional)</legend>
-              <Chips<TipoRelacion> opciones={Object.keys(ETIQUETA_RELACION) as TipoRelacion[]} valor={b.relaciones} onChange={(v) => actualizar("relaciones", v)} etiqueta={(o) => ETIQUETA_RELACION[o]} color="border-pink-600 bg-pink-600 text-white" />
-            </fieldset>
-            <fieldset>
               <legend className="mb-2 text-sm font-medium">Estilo de vida (opcional)</legend>
               <Chips<string> opciones={ESTILOS_VIDA} valor={b.estilo} onChange={(v) => actualizar("estilo", v)} etiqueta={(o) => o} color="border-fuchsia-600 bg-fuchsia-600 text-white" />
             </fieldset>
@@ -310,6 +292,22 @@ export default function Onboarding() {
               </p>
               <p className="mt-2 text-xs text-slate-500">Consejo: cuanto más concreto (valores, aficiones, ritmo de vida), mejores recomendaciones.</p>
             </div>
+            <fieldset>
+              <legend className="mb-1 text-sm font-medium">Tipo de relación que buscas (opcional)</legend>
+              <Chips<TipoRelacion> opciones={Object.keys(ETIQUETA_RELACION) as TipoRelacion[]} valor={b.relaciones} onChange={(v) => actualizar("relaciones", v)} etiqueta={(o) => ETIQUETA_RELACION[o]} color="border-pink-600 bg-pink-600 text-white" />
+            </fieldset>
+            <fieldset>
+              <legend className="mb-1 text-sm font-medium">Valores que buscas en tu pareja (opcional, hasta {MAX_VALORES})</legend>
+              <Chips<string> opciones={VALORES} valor={b.parejaIdealValores} onChange={(v) => actualizar("parejaIdealValores", v)} etiqueta={(o) => o} color="border-rose-600 bg-rose-600 text-white" max={MAX_VALORES} />
+            </fieldset>
+            <fieldset>
+              <legend className="mb-1 text-sm font-medium">Estilo de vida que buscas en tu pareja (opcional, hasta {MAX_VALORES})</legend>
+              <Chips<string> opciones={ESTILOS_VIDA} valor={b.parejaIdealEstilo} onChange={(v) => actualizar("parejaIdealEstilo", v)} etiqueta={(o) => o} color="border-fuchsia-600 bg-fuchsia-600 text-white" max={MAX_VALORES} />
+            </fieldset>
+            <fieldset>
+              <legend className="mb-1 text-sm font-medium">Tus valores (opcional, hasta {MAX_VALORES}; se muestran en tu perfil)</legend>
+              <Chips<string> opciones={VALORES} valor={b.valores} onChange={(v) => actualizar("valores", v)} etiqueta={(o) => o} color="border-violet-600 bg-violet-600 text-white" max={MAX_VALORES} />
+            </fieldset>
           </>
         )}
 

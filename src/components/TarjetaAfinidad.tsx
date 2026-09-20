@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import Avatar from "@/components/Avatar";
+import BarrasAfinidad from "@/components/BarrasAfinidad";
 import { VerificadoCheck } from "@/components/PerfilBadges";
 import type { Recomendacion } from "@/features/conexion/hooks";
 import type { Usuario } from "@/types/social";
@@ -72,6 +73,12 @@ export default function TarjetaAfinidad({
             {usuario.colegio && <>🏫 {usuario.colegio}</>}
           </p>
         )}
+        <div>
+          <p className="mb-2 flex items-baseline justify-between text-xs font-bold text-ink">
+            Afinidad contigo <span className="text-base font-black tabular-nums">{rec.puntaje}%</span>
+          </p>
+          <BarrasAfinidad desglose={rec.desglose} />
+        </div>
         {rec.motivos.length > 0 && (
           <ul className="flex flex-wrap gap-1.5" aria-label="Por qué encajan">
             {rec.motivos.slice(0, 3).map((m) => (

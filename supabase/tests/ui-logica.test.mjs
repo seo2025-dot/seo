@@ -3,10 +3,17 @@
  *   npx tsx supabase/tests/ui-logica.test.mjs
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
 import { sincronizarFotos } from "@/features/fotos/sincronizar";
-import { BORRADOR_VACIO, PASOS, edadDesde, estaturaCm, normalizarUsuario, validarBasico, validarFotos, validarIntereses, validarPareja } from "@/features/onboarding/validacion";
+import { BORRADOR_VACIO, MIN_PAREJA_IDEAL, PASOS, edadDesde, estaturaCm, normalizarUsuario, validarBasico, validarFotos, validarIntereses, validarPareja } from "@/features/onboarding/validacion";
 import { bienvenidaNueva, frasesPruebaSocial, itemsOportunidad, saludoRecurrente } from "@/lib/mensajes";
 import { REFLEXIONES, reflexionDelDia } from "@/lib/reflexiones";
+import { MINIMOS, completitudPerfil, datosCompletitud } from "@/lib/completitud";
+import { MAX_VALORES, VALORES } from "@/data/catalogos";
+import {
+  LOTES_AUTOMATICOS, medallaDe, PUNTOS_ACTIVIDAD, PUNTOS_MINIMOS_TOP, partirEnlaces, progresoHaciaTop, puntosDeActividad, REACCION_POR_ID, REACCIONES,
+  resumenReacciones, TAM_LOTE_VISIBLE, TOP_N, bloquesTrasPublicacion, tendenciasSemana, textoUnion, ventanaRotativa,
+} from "@/lib/comunidad";
 import { RETOS, msHastaReinicio, resumenRetos } from "@/lib/retos";
 import { HITOS, codigoValido, mensajeInvitacion, nivelDe, progresoCirculo, siguienteHito, siguienteNivel, urlInvitacion } from "@/lib/referidos";
 
@@ -234,6 +241,163 @@ await test("reflexiones: rotan por día, son deterministas y solo llevan fuente 
   assert.notEqual(reflexionDelDia(new Date(2026, 3, 1), 1).texto, reflexionDelDia(new Date(2026, 3, 1)).texto);
   for (const r of REFLEXIONES) assert.ok(!r.fuente || /Kardec/.test(r.fuente), "solo llevan fuente las citas de la obra");
   assert.ok(REFLEXIONES.filter((r) => r.fuente).length <= 3, "las citas textuales son pocas y comprobables");
+});
+
+const PERFIL_VACIO = { bio: "", fotos: 0, ubicacion: "", zonas: [], intereses: [], estilo: [], parejaIdeal: "", relaciones: [], parejaIdealValores: [], parejaIdealEstilo: [] };
+const PERFIL_LLENO = {
+  bio: "Restauro pintura colonial y modelo cerámica en un taller junto al río, y creo en las sobremesas largas.",
+  fotos: 4, ubicacion: "Cuenca", zonas: ["Centro"], intereses: ["amigos"], estilo: ["Creativo", "Lector"],
+  parejaIdeal: "Alguien sereno, honesto y con ganas de construir un hogar", relaciones: ["pareja"], parejaIdealValores: ["Honestidad"], parejaIdealEstilo: ["Lector"],
+};
+
+await test("completitud: perfil vacío 0 %, perfil completo 100 % y los pesos suman 100", () => {
+  const v = completitudPerfil(PERFIL_VACIO);
+  assert.equal(v.porcentaje, 0);
+  assert.equal(v.faltantes.length, 6);
+  assert.equal(v.items.reduce((t, i) => t + i.peso, 0), 100);
+  const l = completitudPerfil(PERFIL_LLENO);
+  assert.equal(l.porcentaje, 100);
+  assert.deepEqual(l.faltantes, []);
+  assert.ok(l.items.every((i) => i.hecho));
+});
+
+await test("completitud: cada apartado aporta su peso y admite avance parcial", () => {
+  const solo = (campos) => completitudPerfil({ ...PERFIL_VACIO, ...campos });
+  assert.equal(solo({ fotos: 3 }).porcentaje, 20);
+  assert.equal(solo({ fotos: 1 }).porcentaje, 7); // 1/3 de 20
+  assert.equal(solo({ fotos: 9 }).porcentaje, 20, "más fotos de las necesarias no pasan del tope");
+  assert.equal(solo({ bio: "x".repeat(60) }).porcentaje, 15);
+  assert.equal(solo({ bio: "x".repeat(30) }).porcentaje, 8); // 7,5 redondeado
+  assert.equal(solo({ ubicacion: "Quito" }).porcentaje, 8);
+  assert.equal(solo({ ubicacion: "Quito", zonas: ["Centro"] }).porcentaje, 15);
+  assert.equal(solo({ intereses: ["amigos"], estilo: ["Lector", "Foodie"] }).porcentaje, 15);
+  assert.equal(solo({ parejaIdeal: "x".repeat(20) }).porcentaje, 15);
+  assert.equal(solo({ relaciones: ["pareja"] }).porcentaje, 7);
+  assert.equal(solo({ relaciones: ["pareja"], parejaIdealValores: ["Fe"], parejaIdealEstilo: ["Gamer"] }).porcentaje, 20);
+  assert.equal(solo({ bio: "   " }).porcentaje, 0, "los espacios no cuentan");
+});
+
+await test("completitud: los faltantes van del apartado que más suma al que menos y dan una ayuda concreta", () => {
+  const c = completitudPerfil({ ...PERFIL_LLENO, fotos: 1, bio: "", relaciones: [] });
+  // Sin biografía faltan 15 puntos; con 1 de 3 fotos, 13,3; con 2 de 3 opciones de «qué buscas» marcadas, 6,7.
+  assert.deepEqual(c.faltantes.map((f) => f.id), ["bio", "fotos", "parejaBusca"]);
+  assert.match(c.faltantes[1].ayuda, /Sube 3 fotos \(tienes 1\)/);
+  assert.equal(c.porcentaje, 100 - 13 - 15 - 7);
+});
+
+await test("completitud: el mínimo de la pareja ideal coincide con el que exige el servidor (20 caracteres)", () => {
+  assert.equal(MINIMOS.parejaTexto, MIN_PAREJA_IDEAL);
+  assert.equal(completitudPerfil({ ...PERFIL_LLENO, parejaIdeal: "x".repeat(19) }).faltantes[0].id, "parejaTexto");
+});
+
+await test("completitud: datosCompletitud toma los campos privados del perfil propio", () => {
+  const d = datosCompletitud({ bio: "b", ubicacion: "u", zonas: [], intereses: [], parejaIdeal: "p", relaciones: ["pareja"], parejaIdealValores: ["Fe"] }, 2);
+  assert.deepEqual([d.fotos, d.estilo, d.parejaIdealEstilo, d.parejaIdealValores, d.relaciones], [2, [], [], ["Fe"], ["pareja"]]);
+  assert.equal(datosCompletitud({ bio: "", ubicacion: "", zonas: [], intereses: [] }, 0).parejaIdeal, "");
+});
+
+await test("catálogo de valores: sin repetidos, con límite razonable", () => {
+  assert.equal(new Set(VALORES).size, VALORES.length);
+  assert.ok(VALORES.length >= 10 && MAX_VALORES >= 3 && MAX_VALORES <= 8, "el servidor admite como máximo 8");
+  assert.ok(VALORES.every((v) => v.length <= 40));
+});
+
+const SQL_005 = fs.readFileSync(new URL("../update_005_comunidad_viva.sql", import.meta.url), "utf8");
+
+await test("reacciones: el catálogo coincide con el check de la base de datos y el resumen ordena por frecuencia", () => {
+  const enSql = /reaction in \(([^)]*)\)/.exec(SQL_005)[1].split(",").map((x) => x.trim().replace(/'/g, ""));
+  assert.deepEqual(REACCIONES.map((r) => r.id), enSql, "ids distintos a post_likes.reaction");
+  assert.ok(REACCIONES.every((r) => r.emoji && r.etiqueta) && REACCION_POR_ID.love.emoji === "❤️");
+  assert.deepEqual(resumenReacciones({}), { total: 0, top: [] });
+  const r = resumenReacciones({ a: "love", b: "like", c: "love", d: "wow", e: "love", f: "like" });
+  assert.equal(r.total, 6);
+  assert.deepEqual(r.top, [{ id: "love", n: 3 }, { id: "like", n: 2 }, { id: "wow", n: 1 }]);
+  assert.deepEqual(resumenReacciones({ a: "clap", b: "like" }).top.map((x) => x.id), ["like", "clap"], "a igualdad, el orden del catálogo");
+});
+
+await test("fama: las reglas de puntos coinciden con la función SQL y los topes se respetan", () => {
+  for (const p of PUNTOS_ACTIVIDAD) assert.ok(p.tope >= p.puntos && p.tope % p.puntos === 0, p.id);
+  const topesEnSql = [...SQL_005.matchAll(/least\((\d+),\s*(?:(\d+)\s*\*\s*)?count\(\*\)\)/g)].map((m) => [Number(m[1]), Number(m[2] ?? 1)]);
+  const previstos = PUNTOS_ACTIVIDAD.map((p) => [p.tope, p.puntos]);
+  // El SQL tiene 6 categorías (una de ellas, matches, sobre la unión de user_a y user_b).
+  assert.deepEqual(topesEnSql.sort((a, b) => a[0] - b[0] || a[1] - b[1]), previstos.sort((a, b) => a[0] - b[0] || a[1] - b[1]));
+  assert.match(SQL_005, /where s\.score >= 10/);
+  assert.equal(PUNTOS_MINIMOS_TOP, 10);
+  assert.equal(TOP_N, 10);
+  const cero = { publicaciones: 0, reaccionesRecibidas: 0, comentariosRecibidos: 0, comentariosHechos: 0, invitados: 0, matches: 0 };
+  assert.equal(puntosDeActividad(cero), 0);
+  assert.equal(puntosDeActividad({ ...cero, publicaciones: 2 }), 6);
+  assert.equal(puntosDeActividad({ ...cero, publicaciones: 999, invitados: 999 }), 30 + 100);
+  assert.equal(puntosDeActividad({ ...cero, publicaciones: -5 }), 0, "cantidades negativas no restan");
+});
+
+await test("fama: el progreso hacia el Top 10 y las medallas", () => {
+  assert.deepEqual(progresoHaciaTop({ score: 4, rank: 12, is_top: false, threshold: 10 }), { falta: 6, porcentaje: 40 });
+  assert.deepEqual(progresoHaciaTop({ score: 0, rank: null, is_top: false, threshold: 10 }), { falta: 10, porcentaje: 0 });
+  assert.deepEqual(progresoHaciaTop({ score: 64, rank: 1, is_top: true, threshold: 10 }), { falta: 0, porcentaje: 100 });
+  assert.deepEqual(progresoHaciaTop({ score: 40, rank: 11, is_top: false, threshold: 30 }), { falta: 0, porcentaje: 100 }, "nunca pasa del 100 %");
+  assert.deepEqual([1, 2, 3, 4].map(medallaDe), ["🥇", "🥈", "🥉", null]);
+});
+
+await test("miembros recientes: la ventana rotativa da la vuelta y «se unió hace…» usa la unidad adecuada", () => {
+  assert.deepEqual(ventanaRotativa([], 3, 5), []);
+  assert.deepEqual(ventanaRotativa(["a", "b", "c"], 0, 7), ["a", "b", "c"], "no repite si hay menos de los pedidos");
+  assert.deepEqual(ventanaRotativa(["a", "b", "c", "d", "e"], 3, 3), ["d", "e", "a"]);
+  assert.deepEqual(ventanaRotativa(["a", "b", "c"], -1, 2), ["c", "a"]);
+  const t = Date.UTC(2026, 0, 1, 12);
+  assert.deepEqual([0, 30_000, 5 * 60_000, 3 * 3_600_000, 2 * 86_400_000, 40 * 86_400_000].map((ms) => textoUnion(t - ms, t)),
+    ["se unió ahora", "se unió ahora", "se unió hace 5 min", "se unió hace 3 h", "se unió hace 2 d", "se unió este mes"]);
+});
+
+await test("muro: los bloques intercalados van tras su publicación y un muro corto no los pierde", () => {
+  const dondeVa = (mostradas) => Object.fromEntries(Array.from({ length: mostradas }, (_, i) => [i, bloquesTrasPublicacion(i, mostradas)]));
+  const largo = dondeVa(12);
+  assert.deepEqual(largo[2], ["sugerencias"]); // tras la 3.ª publicación
+  assert.deepEqual(largo[5], ["invitar"]);
+  assert.deepEqual(largo[7], ["conectores"]);
+  assert.deepEqual(largo[9], ["ofertas"]);
+  assert.deepEqual(largo[0], []);
+  const corto = dondeVa(2);
+  assert.deepEqual(corto[1].sort(), ["conectores", "invitar", "ofertas", "sugerencias"], "todos tras la última si hay solo 2");
+  assert.deepEqual(dondeVa(1)[0].length, 4);
+  assert.deepEqual(bloquesTrasPublicacion(0, 0), [], "sin publicaciones no hay posición: los pinta el muro aparte");
+  assert.ok(LOTES_AUTOMATICOS >= 2 && TAM_LOTE_VISIBLE >= 4);
+});
+
+await test("enlaces: se reconocen http(s) y www, se excluye la puntuación final y nunca se enlaza javascript:", () => {
+  assert.deepEqual(partirEnlaces("hola"), [{ tipo: "texto", valor: "hola" }]);
+  assert.deepEqual(partirEnlaces("Mira https://ejemplo.com/casa?id=1, es genial."), [
+    { tipo: "texto", valor: "Mira " },
+    { tipo: "enlace", valor: "https://ejemplo.com/casa?id=1", href: "https://ejemplo.com/casa?id=1" },
+    { tipo: "texto", valor: ", es genial." },
+  ]);
+  assert.deepEqual(partirEnlaces("(www.conectari.com)"), [
+    { tipo: "texto", valor: "(" },
+    { tipo: "enlace", valor: "www.conectari.com", href: "https://www.conectari.com" },
+    { tipo: "texto", valor: ")" },
+  ]);
+  for (const peligroso of ["javascript:alert(1)", "data:text/html,<script>", "vbscript:x", "ftp://x.com"]) {
+    assert.ok(partirEnlaces(peligroso).every((t) => t.tipo === "texto"), peligroso);
+  }
+  const mixto = partirEnlaces("http://a.com y https://b.com");
+  assert.equal(mixto.filter((t) => t.tipo === "enlace").length, 2);
+  assert.equal(mixto.map((t) => t.valor).join(""), "http://a.com y https://b.com", "no se pierde ni se inventa texto");
+  assert.ok(partirEnlaces("https://x.com/\"onmouseover=alert(1)").every((t) => t.tipo === "texto" || !t.href.includes("\"")), "las comillas cortan el enlace");
+});
+
+await test("tendencias: solo la última semana, por zona, de más a menos y con desempate estable", () => {
+  const ahora = Date.UTC(2026, 5, 15);
+  const dia = 86_400_000;
+  const posts = [
+    { zona: "Centro", ts: ahora - dia }, { zona: "Centro", ts: ahora - 2 * dia }, { zona: " Centro ", ts: ahora - 3 * dia },
+    { zona: "Valle Alto", ts: ahora - dia }, { zona: "Valle Alto", ts: ahora - 6 * dia },
+    { zona: "Zona Sur", ts: ahora - dia },
+    { zona: "Zona Norte", ts: ahora - 8 * dia }, // demasiado vieja
+    { ts: ahora - dia }, { zona: "", ts: ahora - dia }, // sin zona
+  ];
+  assert.deepEqual(tendenciasSemana(posts, ahora), [["Centro", 3], ["Valle Alto", 2], ["Zona Sur", 1]]);
+  assert.deepEqual(tendenciasSemana(posts, ahora, 1), [["Centro", 3]]);
+  assert.deepEqual(tendenciasSemana([], ahora), []);
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);

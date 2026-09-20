@@ -11,6 +11,7 @@ export interface PerfilFila {
   zones: string[];
   relations: string[];
   lifestyle: string[];
+  core_values?: string[];
   budget: string | null;
   age: number | null;
   sign: string | null;
@@ -90,6 +91,7 @@ export interface PostFila {
 export interface LikeFila {
   post_id: string;
   user_id: string;
+  reaction: "like" | "love" | "haha" | "wow" | "clap";
 }
 
 export interface ComentarioFila {

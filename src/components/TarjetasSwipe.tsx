@@ -8,6 +8,8 @@ import { compatibilidad, ETIQUETA_INTERES, ETIQUETA_RELACION } from "@/lib/socia
 import Avatar, { degradadoDe } from "@/components/Avatar";
 import FomoBadges from "@/components/FomoBadges";
 import { AstralBadge, ConfianzaBadge, VerificadoCheck } from "@/components/PerfilBadges";
+import BarrasAfinidad from "@/components/BarrasAfinidad";
+import type { Recomendacion } from "@/features/conexion/hooks";
 
 export function ContenidoAnuncio({
   anuncio,
@@ -78,13 +80,17 @@ export function ContenidoPersona({
   yo,
   contexto = "pareja",
   modoCita = false,
+  afinidad,
 }: {
   persona: Usuario;
   yo: Usuario;
   contexto?: TipoRelacion;
   modoCita?: boolean;
+  /** Afinidad calculada por el motor del servidor (pareja ideal, valores, estilo de vida…). Sin ella se usa la local de zonas e intereses. */
+  afinidad?: Recomendacion;
 }) {
-  const { puntaje, zonasComunes, interesesComunes } = compatibilidad(yo, persona);
+  const { puntaje: puntajeLocal, zonasComunes, interesesComunes } = compatibilidad(yo, persona);
+  const puntaje = afinidad?.puntaje ?? puntajeLocal;
   const comunes = new Set(zonasComunes.map((z) => z.toLowerCase()));
   const signo = persona.signo ? infoSigno(persona.signo) : undefined;
 
@@ -116,12 +122,17 @@ export function ContenidoPersona({
 
       <div className="mt-4 rounded-2xl bg-black/20 p-3 backdrop-blur">
         <div className="flex items-baseline justify-between text-sm">
-          <span className="font-medium">Afinidad de zonas e intereses</span>
+          <span className="font-medium">{afinidad ? "Afinidad contigo" : "Afinidad de zonas e intereses"}</span>
           <span className="text-xl font-extrabold">{puntaje}%</span>
         </div>
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-white/25">
           <div className="h-full rounded-full bg-white" style={{ width: `${puntaje}%` }} />
         </div>
+        {afinidad && (
+          <div className="mt-3">
+            <BarrasAfinidad desglose={afinidad.desglose} sobreColor />
+          </div>
+        )}
       </div>
 
       <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-white/95">{persona.bio}</p>

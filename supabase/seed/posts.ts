@@ -14,7 +14,7 @@ export function crearPostsIniciales(ahora: number): Post[] {
     ts: ahora - min * MIN,
   });
 
-  return [
+  const posts: Omit<Post, "reacciones">[] = [
     {
       id: "post1",
       autorId: "u4",
@@ -101,4 +101,5 @@ export function crearPostsIniciales(ahora: number): Post[] {
       comentarios: [],
     },
   ];
+  return posts.map((p) => ({ ...p, reacciones: Object.fromEntries(p.likes.map((id) => [id, "like" as const])) }));
 }

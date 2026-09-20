@@ -7,6 +7,7 @@ import { AnimatePresence } from "framer-motion";
 import type { Signo, TipoRelacion, Usuario } from "@/types/social";
 import { ESTILOS_VIDA } from "@/data/catalogos";
 import { useSocial } from "@/context/SocialContext";
+import { useAfinidades } from "@/features/conexion/hooks";
 import { SIGNOS } from "@/lib/astrologia";
 import { rompehielosPersona } from "@/lib/rompehielos";
 import { compatibilidad, ETIQUETA_RELACION, primerNombre } from "@/lib/social";
@@ -29,6 +30,7 @@ export default function CitasPage() {
   const [estilo, setEstilo] = useState("");
   const [modal, setModal] = useState<{ persona: Usuario; cid: string } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  const afinidades = useAfinidades();
 
   useEffect(() => {
     if (!aviso) return;
@@ -46,8 +48,16 @@ export default function CitasPage() {
           (relacion === "todas" || u.relaciones?.includes(relacion)) &&
           (!signo || u.signo === signo) &&
           (!estilo || u.estilo?.includes(estilo)),
-      ).sort((a, b) => compatibilidad(estado.yo, b).puntaje - compatibilidad(estado.yo, a).puntaje),
-    [usuarios, estado.amigos, estado.vistasPersonas, estado.yo, relacion, signo, estilo],
+      ).sort((a, b) => {
+        // Quien el servidor recomienda va primero, por su afinidad real; el resto, por zonas e intereses.
+        const sa = afinidades.get(a.id)?.puntaje;
+        const sb = afinidades.get(b.id)?.puntaje;
+        if (sa !== undefined && sb !== undefined) return sb - sa;
+        if (sa !== undefined) return -1;
+        if (sb !== undefined) return 1;
+        return compatibilidad(estado.yo, b).puntaje - compatibilidad(estado.yo, a).puntaje;
+      }),
+    [usuarios, estado.amigos, estado.vistasPersonas, estado.yo, relacion, signo, estilo, afinidades],
   );
 
   const contexto: TipoRelacion = relacion === "todas" ? "pareja" : relacion;
@@ -140,7 +150,7 @@ export default function CitasPage() {
             onSwipe={alDeslizar}
             deshabilitado={modal !== null}
             etiquetaCard={(u) => `${u.nombre}, ${u.ubicacion}`}
-            renderCard={(u) => <ContenidoPersona persona={u} yo={estado.yo} contexto={contexto} modoCita />}
+            renderCard={(u) => <ContenidoPersona persona={u} yo={estado.yo} contexto={contexto} modoCita afinidad={afinidades.get(u.id)} />}
             pie={(u) => (
               <Link href={`/usuarios/${u.id}`} className="text-brand-600 hover:underline">
                 Ver perfil completo
