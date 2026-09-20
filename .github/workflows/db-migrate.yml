@@ -9,13 +9,15 @@ on:
       archivo:
         description: Actualización a aplicar
         required: true
-        default: supabase/update_005_comunidad_viva.sql
+        default: supabase/update_007_buscador_universal.sql
         type: choice
         options:
           - supabase/update_002_fotos_onboarding.sql
           - supabase/update_003_conexion_viral.sql
           - supabase/update_004_pareja_ideal.sql
           - supabase/update_005_comunidad_viva.sql
+          - supabase/update_006_directorios.sql
+          - supabase/update_007_buscador_universal.sql
 
 jobs:
   migrar:

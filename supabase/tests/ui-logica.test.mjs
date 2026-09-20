@@ -14,6 +14,11 @@ import {
   LOTES_AUTOMATICOS, medallaDe, PUNTOS_ACTIVIDAD, PUNTOS_MINIMOS_TOP, partirEnlaces, progresoHaciaTop, puntosDeActividad, REACCION_POR_ID, REACCIONES,
   resumenReacciones, TAM_LOTE_VISIBLE, TOP_N, bloquesTrasPublicacion, tendenciasSemana, textoUnion, ventanaRotativa,
 } from "@/lib/comunidad";
+import {
+  CANALES, CATEGORIAS_EVENTO, DENUNCIAS_PARA_OCULTAR, ETIQUETA_DIA, ETIQUETA_ESTADO_PEDIDO, MAX_PERFILES_POR_PERSONA, MONEDAS_PRIMER_PERFIL, RAZONES_DENUNCIA,
+  VERTICAL_POR_ALIAS, VERTICAL_POR_ID, VERTICALES, VERTICALES_CON_SOLICITUDES, esPedidoAbierto, estaAbierto, etiquetaSubtipo, horarioValido, rutaProveedor, rutaVertical,
+  textoHorarioDia, transicionesPedido,
+} from "@/data/directorio";
 import { RETOS, msHastaReinicio, resumenRetos } from "@/lib/retos";
 import { HITOS, codigoValido, mensajeInvitacion, nivelDe, progresoCirculo, siguienteHito, siguienteNivel, urlInvitacion } from "@/lib/referidos";
 
@@ -398,6 +403,94 @@ await test("tendencias: solo la última semana, por zona, de más a menos y con 
   assert.deepEqual(tendenciasSemana(posts, ahora), [["Centro", 3], ["Valle Alto", 2], ["Zona Sur", 1]]);
   assert.deepEqual(tendenciasSemana(posts, ahora, 1), [["Centro", 3]]);
   assert.deepEqual(tendenciasSemana([], ahora), []);
+});
+
+const SQL_006 = fs.readFileSync(new URL("../update_006_directorios.sql", import.meta.url), "utf8");
+
+await test("directorios: secciones, alias y categorías bien formados y sin colisión con las rutas existentes", () => {
+  assert.deepEqual(VERTICALES.map((v) => v.id), ["movilidad", "delivery", "salud", "eventos", "mascotas", "hogar"]);
+  assert.equal(new Set(VERTICALES.map((v) => v.alias)).size, VERTICALES.length, "alias repetidos");
+  const carpetas = fs.readdirSync(new URL("../../src/app", import.meta.url), { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => d.name);
+  for (const v of VERTICALES) {
+    assert.ok(!carpetas.includes(v.alias), `«/${v.alias}» chocaría con una ruta existente`);
+    assert.ok(v.etiqueta && v.emoji && v.lema && v.proveedor && v.degradado, v.id);
+    assert.ok(v.subtipos.length >= 3 && new Set(v.subtipos.map((s) => s.id)).size === v.subtipos.length, `subtipos de ${v.id}`);
+    assert.ok(v.subtipos.every((s) => /^[a-z]+(_[a-z]+)*$/.test(s.id) && s.etiqueta && s.emoji), `ids de ${v.id}`);
+    assert.equal(VERTICAL_POR_ID[v.id], v);
+    assert.equal(VERTICAL_POR_ALIAS[v.alias], v);
+  }
+  assert.equal(etiquetaSubtipo("hogar", "cerrajero"), "Cerrajero");
+  assert.equal(etiquetaSubtipo("hogar", "desconocido"), "desconocido");
+});
+
+await test("directorios: las capacidades de cada sección coinciden con las reglas del servidor", () => {
+  const con = (f) => VERTICALES.filter(f).map((v) => v.id);
+  // place_order(): delivery, salud y mascotas · create_service_request(): movilidad, hogar y mascotas
+  assert.deepEqual(con((v) => v.capacidades.pedidos), ["delivery", "salud", "mascotas"]);
+  assert.deepEqual(con((v) => v.capacidades.solicitudes), ["movilidad", "mascotas", "hogar"]); // en el orden de VERTICALES
+  assert.match(SQL_006, /pr\.vertical not in \('delivery', 'salud', 'mascotas'\)/);
+  assert.match(SQL_006, /p_vertical not in \('movilidad', 'hogar', 'mascotas'\)/);
+  // _duty_prepare(): turnos solo en salud y hogar · _events_prepare(): eventos solo en «eventos»
+  assert.deepEqual(con((v) => v.capacidades.turnos), ["salud", "hogar"]);
+  assert.match(SQL_006, /vertical in \('salud', 'hogar'\)/);
+  assert.deepEqual(con((v) => v.capacidades.eventos), ["eventos"]);
+  // send_offer(): identidad verificada solo para Movilidad
+  assert.deepEqual(con((v) => v.capacidades.ofertaRequiereKyc), ["movilidad"]);
+  // _items_prepare(): qué tipo de elemento admite cada sección
+  const admite = (tipo) => con((v) => v.capacidades.catalogo.includes(tipo));
+  assert.deepEqual(admite("menu_item"), ["delivery"]);
+  assert.deepEqual(admite("rate"), ["movilidad"]);
+  assert.deepEqual(admite("product"), ["delivery", "salud", "mascotas"]);
+  assert.match(SQL_006, /new\.kind = 'menu_item' and v_vertical <> 'delivery'/);
+  assert.match(SQL_006, /new\.kind = 'rate' and v_vertical <> 'movilidad'/);
+  assert.match(SQL_006, /new\.kind = 'product' and v_vertical not in \('delivery', 'salud', 'mascotas'\)/);
+  assert.deepEqual(VERTICALES_CON_SOLICITUDES.map((v) => v.id), ["movilidad", "mascotas", "hogar"]);
+  // Constantes duplicadas en SQL
+  assert.match(SQL_006, new RegExp(`>= ${MAX_PERFILES_POR_PERSONA} then\\s+raise exception 'Has alcanzado el máximo de ${MAX_PERFILES_POR_PERSONA} perfiles'`));
+  assert.match(SQL_006, new RegExp(`perform public\\._earn\\(new\\.owner_id, ${MONEDAS_PRIMER_PERFIL}, 'directory_first_provider'\\)`));
+  assert.match(SQL_006, new RegExp(`if v_n >= ${DENUNCIAS_PARA_OCULTAR} then`));
+  const canalesSql = /channels <@ array\[([^\]]*)\]/.exec(SQL_006)[1].split(",").map((x) => x.trim().replace(/'/g, ""));
+  assert.deepEqual(CANALES.map((c) => c.id), canalesSql, "canales distintos a providers.channels");
+  const eventosSql = /category in \(([^)]*)\)\)/.exec(SQL_006.slice(SQL_006.indexOf("create table if not exists public.events")))[1].split(",").map((x) => x.trim().replace(/'/g, ""));
+  assert.deepEqual(CATEGORIAS_EVENTO.map((c) => c.id), eventosSql, "categorías de evento distintas a events.category");
+  const razonesSql = /reason in \(([^)]*)\)/.exec(SQL_006)[1].split(",").map((x) => x.trim().replace(/'/g, ""));
+  assert.deepEqual([...RAZONES_DENUNCIA.map((r) => r.id)].sort(), razonesSql.sort(), "razones distintas a content_reports.reason");
+});
+
+await test("pedidos: transiciones permitidas para el negocio y la persona", () => {
+  assert.deepEqual(transicionesPedido("negocio", "placed"), ["accepted", "rejected"]);
+  assert.deepEqual(transicionesPedido("negocio", "accepted"), ["preparing", "on_the_way", "rejected"]);
+  assert.deepEqual(transicionesPedido("negocio", "on_the_way"), ["delivered"]);
+  assert.deepEqual(transicionesPedido("cliente", "placed"), ["cancelled"]);
+  assert.deepEqual(transicionesPedido("cliente", "accepted"), [], "aceptado: ya no se cancela solo");
+  for (const fin of ["delivered", "rejected", "cancelled"]) {
+    assert.deepEqual([transicionesPedido("negocio", fin), transicionesPedido("cliente", fin)], [[], []], `${fin} es definitivo`);
+    assert.equal(esPedidoAbierto(fin), false);
+  }
+  assert.ok(["placed", "accepted", "preparing", "on_the_way"].every(esPedidoAbierto));
+  assert.ok(Object.values(ETIQUETA_ESTADO_PEDIDO).every((e) => e.etiqueta && e.emoji));
+});
+
+await test("horarios: validación, «abierto ahora» a la hora de Ecuador y texto por día", () => {
+  const h = { lun: [["08:00", "13:00"], ["15:00", "19:00"]], sab: [["09:00", "24:00"]] };
+  assert.equal(horarioValido(h), true);
+  assert.equal(horarioValido(null), false);
+  assert.equal(horarioValido([]), false);
+  assert.equal(horarioValido({ lun: [["13:00", "08:00"]] }), false);
+  assert.equal(horarioValido({ funes: [] }), false);
+  const en = (iso) => estaAbierto(h, false, new Date(iso));
+  assert.equal(en("2026-06-01T15:00:00Z"), true, "lunes 10:00 en Ecuador");
+  assert.equal(en("2026-06-01T18:00:00Z"), false, "lunes 13:00: el cierre es exclusivo");
+  assert.equal(en("2026-06-01T17:59:00Z"), true);
+  assert.equal(en("2026-06-02T15:00:00Z"), false, "martes sin horario");
+  assert.equal(en("2026-06-07T04:59:00Z"), true, "sábado 23:59 en Ecuador (04:59 UTC del domingo)");
+  assert.equal(en("2026-06-06T13:59:00Z"), false, "sábado 08:59 antes de abrir");
+  assert.equal(estaAbierto({}, true, new Date("2026-06-02T15:00:00Z")), true, "24 horas");
+  assert.equal(estaAbierto({}, false, new Date()), false, "sin horario definido: cerrado");
+  assert.equal(textoHorarioDia(h, "lun"), "08:00–13:00 · 15:00–19:00");
+  assert.equal(textoHorarioDia(h, "dom"), "Cerrado");
+  assert.deepEqual([rutaVertical("salud"), rutaProveedor("hogar", "plomeria-pedro-ab12cd")], ["/directorio/salud", "/directorio/hogar/plomeria-pedro-ab12cd"]);
+  assert.equal(ETIQUETA_DIA.mie, "Miércoles");
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);
