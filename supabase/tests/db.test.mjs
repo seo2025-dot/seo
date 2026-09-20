@@ -1160,6 +1160,199 @@ await test("MIGRACIÓN: update_004 sobre una base con 003 (dos veces) conserva p
   }
 });
 
+// ── 7d. Comunidad viva (update_005): reacciones, avisos, miembros recientes y Top Conectores ──
+console.log("\nComunidad viva: reacciones, avisos, miembros recientes y Top Conectores");
+const { puntosDeActividad } = await import("@/lib/comunidad");
+/** Persona real con el perfil completo, en «Cuenca · Centro». */
+const miembroReal = async (nombre) => {
+  const id = await nuevoUsuario(nombre);
+  await q("update public.profiles set onboarding_completed = true, location = 'Cuenca · Centro' where id = $1", [id]);
+  return id;
+};
+const publicarPosts = async (autor, n = 1, cuerpo = "Publicación de prueba") =>
+  (await q("insert into public.posts (author_id, kind, body) select $1, 'historia', $2 || ' ' || g from generate_series(1, $3::int) g returning id", [autor, cuerpo, n])).map((r) => r.id);
+
+const autora = await miembroReal("Autora");
+const lectora = await miembroReal("Lectora");
+const [postA] = await publicarPosts(autora);
+await test("reacciones: por defecto «like»; solo su dueña o dueño la cambia; solo valores válidos y sin duplicar", async () => {
+  await como(lectora, "insert into public.post_likes (post_id, user_id) values ($1, $2)", [postA, lectora]);
+  const reaccion = async () => (await q("select reaction from public.post_likes where post_id = $1 and user_id = $2", [postA, lectora]))[0].reaction;
+  assert.equal(await reaccion(), "like");
+  await como(lectora, "update public.post_likes set reaction = 'love' where post_id = $1 and user_id = $2", [postA, lectora]);
+  assert.equal(await reaccion(), "love");
+  assert.equal((await como(autora, "update public.post_likes set reaction = 'haha' where post_id = $1 and user_id = $2 returning user_id", [postA, lectora])).length, 0, "nadie más puede cambiarla");
+  assert.equal(await reaccion(), "love");
+  await falla(como(lectora, "update public.post_likes set reaction = 'ira' where post_id = $1 and user_id = $2", [postA, lectora]), /reaction|check/);
+  await falla(como(lectora, "update public.post_likes set user_id = $2 where post_id = $1 and user_id = $2", [postA, autora]), /permission denied/);
+  await falla(como(lectora, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'wow')", [postA, lectora]), /duplicate|unique/);
+  await falla(como(lectora, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'wow')", [postA, autora]), /row-level security/);
+  await como(lectora, "delete from public.post_likes where post_id = $1 and user_id = $2", [postA, lectora]);
+  await como(lectora, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'clap')", [postA, lectora]);
+  assert.equal(await reaccion(), "clap");
+});
+
+const comentarista = await miembroReal("Comentarista");
+const [postB] = await publicarPosts(autora, 1, "Otra publicación");
+const avisosDe = (uid, post) => q("select type, title, body, href, data, read_at from public.notifications where user_id = $1 and data ->> 'post' = $2 order by created_at", [uid, post]);
+await test("avisos: comentar o reaccionar avisa al autor una sola vez; las acciones sobre lo propio no avisan", async () => {
+  await como(comentarista, "insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Me encantó tu historia, gracias por compartirla')", [postB, comentarista]);
+  let a = await avisosDe(autora, postB);
+  assert.equal(a.length, 1);
+  assert.equal(a[0].type, "sistema");
+  assert.match(a[0].title, /💬 Comentarista comentó tu publicación/);
+  assert.equal(a[0].body, "Me encantó tu historia, gracias por compartirla");
+  assert.equal(a[0].href, "/comunidad");
+  assert.equal(a[0].read_at, null);
+  await como(comentarista, "insert into public.post_likes (post_id, user_id, reaction) values ($1, $2, 'love')", [postB, comentarista]);
+  a = await avisosDe(autora, postB);
+  assert.equal(a.length, 2);
+  assert.match(a[1].title, /❤️ Comentarista reaccionó a tu publicación/);
+  // Cambiar o quitar y volver a poner la reacción no duplica el aviso.
+  await como(comentarista, "update public.post_likes set reaction = 'wow' where post_id = $1 and user_id = $2", [postB, comentarista]);
+  await como(comentarista, "delete from public.post_likes where post_id = $1 and user_id = $2", [postB, comentarista]);
+  await como(comentarista, "insert into public.post_likes (post_id, user_id) values ($1, $2)", [postB, comentarista]);
+  assert.equal((await avisosDe(autora, postB)).length, 2);
+  // Lo propio no avisa; y el aviso llega solo al autor.
+  await como(autora, "insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Gracias')", [postB, autora]);
+  await como(autora, "insert into public.post_likes (post_id, user_id) values ($1, $2)", [postB, autora]);
+  assert.equal((await avisosDe(autora, postB)).length, 2);
+  assert.equal((await avisosDe(comentarista, postB)).length, 0);
+});
+
+const recienLlegada = await miembroReal("Sofía Recién Llegada");
+const demoNueva = await miembroReal("Demo Reciente");
+const sinTerminar = await nuevoUsuario("SinTerminar");
+await q("update public.profiles set is_demo = true where id = $1", [demoNueva]);
+await q("update public.profiles set created_at = now() + interval '2 hours' where id = $1", [recienLlegada]);
+await q("update public.profiles set created_at = now() + interval '3 hours' where id = any($1)", [[demoNueva, sinTerminar]]);
+await test("recent_members: solo personas reales con perfil completo, lo mínimo (nombre de pila y ciudad), más recientes primero, público", async () => {
+  const r = await como(null, "select * from public.recent_members(30)");
+  assert.deepEqual(Object.keys(r[0]).sort(), ["avatar_url", "city", "first_name", "joined_at", "member_id"]);
+  assert.equal(r[0].member_id, recienLlegada, "la más reciente va primero");
+  assert.equal(r[0].first_name, "Sofía", "solo el nombre de pila");
+  assert.equal(r[0].city, "Cuenca", "solo la ciudad, no el barrio");
+  const ids = r.map((x) => x.member_id);
+  assert.ok(!ids.includes(demoNueva) && !ids.includes(sinTerminar), "ni perfiles demo ni perfiles sin terminar");
+  assert.ok(r.every((x, i) => i === 0 || new Date(r[i - 1].joined_at) >= new Date(x.joined_at)), "orden descendente");
+  assert.equal((await como(null, "select * from public.recent_members(1)")).length, 1);
+  assert.ok((await como(null, "select * from public.recent_members(9999)")).length <= 30, "tope de 30");
+});
+
+// Actividad conocida de «Estrella»: 12 publicaciones (tope 30), 24 reacciones, 3 comentarios recibidos, 2 hechos y 1 match.
+const estrella = await miembroReal("Estrella");
+const fans = [await miembroReal("Fan1"), await miembroReal("Fan2"), await miembroReal("Fan3"), await miembroReal("Fan4")];
+const postsEstrella = await publicarPosts(estrella, 12, "Post de Estrella");
+for (const p of postsEstrella.slice(0, 6)) for (const f of fans) await q("insert into public.post_likes (post_id, user_id) values ($1, $2)", [p, f]);
+for (const p of postsEstrella.slice(0, 3)) await q("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Muy bueno')", [p, fans[0]]);
+const [postFan] = await publicarPosts(fans[0], 1, "Post de Fan1");
+for (let i = 0; i < 2; i++) await q("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Gracias por compartir')", [postFan, estrella]);
+await q("insert into public.post_likes (post_id, user_id) values ($1, $2)", [postsEstrella[6], estrella]);            // sobre lo propio: no cuenta
+await q("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Comento lo mío')", [postsEstrella[6], estrella]); // ídem
+await q("insert into public.matches (user_a, user_b) values (least($1::uuid, $2::uuid), greatest($1::uuid, $2::uuid))", [estrella, fans[0]]);
+const puntosSql = async (uid) => (await q("select score from public._connector_scores() where user_id = $1", [uid]))[0]?.score ?? 0;
+await test("PARIDAD: los puntos de actividad en SQL == puntosDeActividad() en TypeScript (con topes y sin contar lo propio)", async () => {
+  const esperado = puntosDeActividad({ publicaciones: 12, reaccionesRecibidas: 24, comentariosRecibidos: 3, comentariosHechos: 2, invitados: 0, matches: 1 });
+  assert.equal(esperado, 30 + 24 + 6 + 2 + 0 + 2);
+  assert.equal(await puntosSql(estrella), esperado);
+  // Fan1: 1 publicación (3) + 3 comentarios hechos (3) + 2 recibidos (4) + 1 match (2)
+  assert.equal(await puntosSql(fans[0]), puntosDeActividad({ publicaciones: 1, reaccionesRecibidas: 0, comentariosRecibidos: 2, comentariosHechos: 3, invitados: 0, matches: 1 }));
+  // Topes: 40 publicaciones siguen sumando 30.
+  const insistente = await miembroReal("Insistente");
+  await publicarPosts(insistente, 40);
+  assert.equal(await puntosSql(insistente), 30);
+  assert.equal(puntosDeActividad({ publicaciones: 40, reaccionesRecibidas: 500, comentariosRecibidos: 500, comentariosHechos: 500, invitados: 500, matches: 500 }), 30 + 50 + 40 + 20 + 100 + 20);
+});
+await test("la actividad de hace más de 30 días no cuenta", async () => {
+  const antigua = await miembroReal("Antigua");
+  await publicarPosts(antigua, 5);
+  assert.equal(await puntosSql(antigua), 15);
+  await q("update public.posts set created_at = now() - interval '31 days' where author_id = $1", [antigua]);
+  assert.equal(await puntosSql(antigua), 0);
+});
+
+const medio = await miembroReal("Medio");
+const pobre = await miembroReal("Pobre");
+const famosoDemo = await miembroReal("FamosoDemo");
+const famosoSinTerminar = await nuevoUsuario("FamosoSinTerminar");
+await publicarPosts(medio, 3);
+await q("insert into public.post_likes (post_id, user_id) select id, $2 from public.posts where author_id = $1 limit 1", [medio, lectora]); // 9 + 1 = 10
+await publicarPosts(pobre, 3); // 9: no llega
+await q("update public.profiles set is_demo = true where id = $1", [famosoDemo]);
+await publicarPosts(famosoDemo, 12);
+await publicarPosts(famosoSinTerminar, 12);
+await test("top_connectors: solo con ≥ 10 puntos, sin perfiles demo ni sin terminar, ordenado, con puesto y público", async () => {
+  const r = await como(null, "select * from public.top_connectors(25)");
+  assert.deepEqual(Object.keys(r[0]).sort(), ["avatar_url", "city", "display_name", "person_id", "rank", "score"]);
+  const por = (id) => r.find((x) => x.person_id === id);
+  assert.equal(por(estrella).score, 64);
+  assert.equal(por(estrella).rank, 1);
+  assert.equal(por(medio)?.score, 10, "10 puntos justos entran");
+  assert.equal(por(pobre), undefined, "9 puntos no");
+  assert.equal(por(famosoDemo), undefined, "los perfiles demo no participan");
+  assert.equal(por(famosoSinTerminar), undefined);
+  assert.ok(r.every((x) => x.score >= 10) && r.every((x, i) => i === 0 || r[i - 1].score >= x.score), "ordenado de mayor a menor");
+  assert.equal(por(estrella).city, "Cuenca");
+  assert.equal((await como(null, "select * from public.top_connectors(2)")).length, 2);
+});
+await test("my_connector_status: tu puntaje, puesto y lo que falta; exige sesión", async () => {
+  const e = (await como(estrella, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([e.score, e.rank, e.is_top], [64, 1, true]);
+  const p = (await como(pobre, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([p.score, p.is_top, p.threshold], [9, false, 10], "con menos de 10 personas en el ranking bastan 10 puntos");
+  const nada = (await como(sinTerminar, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([nada.score, nada.rank, nada.is_top], [0, null, false]);
+  await falla(como(null, "select public.my_connector_status()"), /permission denied|No autenticado/);
+  await falla(como(estrella, "select * from public._connector_scores()"), /permission denied/);
+});
+await test("con el ranking lleno el umbral pasa a ser el puntaje del décimo puesto", async () => {
+  const lleno = [];
+  for (let i = 0; i < 10; i++) {
+    const u = await miembroReal(`Cima${i}`);
+    await publicarPosts(u, 10); // 30 puntos cada una
+    lleno.push(u);
+  }
+  const p = (await como(pobre, "select public.my_connector_status() s"))[0].s;
+  assert.deepEqual([p.is_top, p.threshold], [false, 30]);
+  const top = await como(null, "select * from public.top_connectors(10)");
+  assert.equal(top.length, 10);
+  assert.ok(top.every((x) => x.score >= 30), "solo entran los 10 mejores");
+  await q("delete from auth.users where id = any($1)", [lleno]);
+});
+
+await test("MIGRACIÓN: update_005 sobre una base con 004 (dos veces) conserva los «me gusta» como reacción «like» y activa avisos y ranking", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-005-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-005-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 005 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_005_comunidad_viva.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_005 difieren");
+  await server.createDatabase("migracion5");
+  const m = new pg.Client({ ...conn, database: "migracion5" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 + 003 + 004
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'autor@test.dev', '{\"full_name\":\"Autor Previo\"}'), (gen_random_uuid(), 'fan@test.dev', '{\"full_name\":\"Fan Previo\"}')");
+    const [autor, fan] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    const post = (await m.query("insert into public.posts (author_id, kind, body) values ($1, 'historia', 'Previa') returning id", [autor])).rows[0].id;
+    await m.query("insert into public.post_likes (post_id, user_id) values ($1, $2)", [post, fan]); // antes de existir la columna reaction
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select reaction from public.post_likes where post_id = $1", [post])).rows[0].reaction, "like");
+    const fns = (await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname in ('recent_members','top_connectors','my_connector_status','_connector_scores','_notify_post_comment','_notify_post_reaction')")).rows[0].n;
+    assert.equal(fns, 6);
+    assert.equal((await m.query("select count(*)::int n from pg_trigger where tgname in ('trg_notify_post_comment','trg_notify_post_reaction') and not tgisinternal")).rows[0].n, 2, "una sola vez cada disparador");
+    await m.query("insert into public.post_comments (post_id, author_id, body) values ($1, $2, 'Después de migrar')", [post, fan]);
+    const avisos = (await m.query("select title from public.notifications where user_id = $1", [autor])).rows;
+    assert.equal(avisos.length, 1, "un solo aviso aunque la migración se ejecutó dos veces");
+    assert.match(avisos[0].title, /Fan comentó tu publicación/);
+  } finally {
+    await m.end();
+  }
+});
+
 // ── 7c. API de fotos (manejadores reales + Postgres real + almacenamiento local) ─
 console.log("\nAPI de fotos: manejadores de /api/photos");
 const { crearManejadores } = await import("@/lib/media/manejadores");
@@ -1385,6 +1578,8 @@ await test("las columnas escritas con insert/update literales están concedidas 
     ["posts", "INSERT", ["author_id", "kind", "body", "zone", "image_url"]],
     ["messages", "INSERT", ["chat_id", "sender_id", "kind", "body", "amount", "currency", "days", "status"]],
     ["friendships", "INSERT", ["requester_id", "addressee_id"]],
+    ["post_likes", "INSERT", ["post_id", "user_id", "reaction"]],
+    ["post_likes", "UPDATE", ["reaction"]],
     ["post_comments", "INSERT", ["post_id", "author_id", "body"]],
     ["profiles", "UPDATE", ["display_name", "handle", "bio", "location", "interests", "zones", "relations", "lifestyle", "budget", "age", "sign", "avatar_url", "professional", "core_values", "university", "school", "height_cm"]],
     ["user_private", "UPDATE", ["birth_date", "ideal_partner", "ideal_values", "ideal_lifestyle"]],

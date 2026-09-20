@@ -83,6 +83,9 @@ export interface Usuario {
   profesional?: Profesional;
 }
 
+/** Reacciones rápidas a una publicación (deben coincidir con el check de post_likes.reaction). */
+export type ReaccionId = "like" | "love" | "haha" | "wow" | "clap";
+
 export type TipoPost = "historia" | "consulta" | "propiedad" | "experiencia";
 
 export interface Comentario {
@@ -100,7 +103,8 @@ export interface Post {
   zona?: string;
   imagen?: string;
   ts: number;
-  likes: string[]; // ids de usuario
+  likes: string[]; // ids de usuario que reaccionaron (con cualquier reacción)
+  reacciones: Record<string, ReaccionId>; // id de usuario → su reacción
   comentarios: Comentario[];
 }
 

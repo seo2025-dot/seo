@@ -91,6 +91,7 @@ export interface PostFila {
 export interface LikeFila {
   post_id: string;
   user_id: string;
+  reaction: "like" | "love" | "haha" | "wow" | "clap";
 }
 
 export interface ComentarioFila {

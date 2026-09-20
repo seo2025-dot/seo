@@ -12,7 +12,7 @@ import {
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { Propiedad } from "@/types/propiedad";
 import type { Anuncio, Demanda, Gig, Negocio, Notificacion, Vacante, Vehiculo } from "@/types/mercado";
-import type { Conversacion, Post, Solicitud, TipoPost, Usuario } from "@/types/social";
+import type { Conversacion, Post, ReaccionId, Solicitud, TipoPost, Usuario } from "@/types/social";
 import { negocioAAnuncio, propiedadAAnuncio, vehiculoAAnuncio } from "@/lib/anuncios";
 import { MISIONES } from "@/lib/recompensas";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
@@ -163,6 +163,10 @@ const CRUDO_VACIO: Crudo = {
   ...PRIVADO_VACIO,
 };
 
+/** Publicaciones que se cargan al arrancar y tamaño de cada lote posterior del muro infinito. */
+const POSTS_INICIALES = 100;
+const LOTE_POSTS = 20;
+
 const upsertId = <T extends { id: string }>(lista: T[], fila: T, alFrente = false): T[] => {
   const i = lista.findIndex((x) => x.id === fila.id);
   if (i === -1) return alFrente ? [fila, ...lista] : [...lista, fila];
@@ -245,6 +249,11 @@ interface SocialContextValue {
   publicarPost: (d: DatosPost) => Promise<void>;
   eliminarPost: (id: string) => Promise<void>;
   alternarLikePost: (postId: string) => Promise<void>;
+  /** Fija (o, con null, quita) tu reacción a una publicación. */
+  reaccionarPost: (postId: string, tipo: ReaccionId | null) => Promise<void>;
+  /** Trae del servidor un lote de publicaciones más antiguas (muro infinito). Devuelve si aún quedan más. */
+  cargarMasPosts: () => Promise<boolean>;
+  hayMasPosts: boolean;
   comentarPost: (postId: string, texto: string) => Promise<void>;
   leerNotificaciones: () => void;
 
@@ -282,6 +291,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
   const [aviso, setAviso] = useState<string | null>(null);
   const [enLineaIds, setEnLineaIds] = useState<string[]>([]);
   const [escribiendo, setEscribiendo] = useState<Record<string, boolean>>({});
+  const [hayMasPosts, setHayMasPosts] = useState(false);
+  const cargandoPosts = useRef(false);
 
   const uid = sesion.uid;
   const uidRef = useRef<string | null>(null);
@@ -368,7 +379,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       sb.from("profiles").select("*").limit(1000),
       sb.from("listings").select("*").order("created_at", { ascending: false }).limit(500),
       sb.from("jobs").select("*").order("created_at", { ascending: false }).limit(300),
-      sb.from("posts").select("*").order("created_at", { ascending: false }).limit(100),
+      sb.from("posts").select("*").order("created_at", { ascending: false }).limit(POSTS_INICIALES),
       sb.rpc("demand_counts_for_offers"),
     ]);
     const fallo = perfiles.error ?? listings.error ?? jobs.error ?? posts.error;
@@ -385,7 +396,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     const ids = (posts.data ?? []).map((p: PostFila) => p.id);
     const [likes, comentarios] = ids.length
       ? await Promise.all([
-          sb.from("post_likes").select("post_id, user_id").in("post_id", ids),
+          sb.from("post_likes").select("post_id, user_id, reaction").in("post_id", ids),
           sb.from("post_comments").select("*").in("post_id", ids).order("created_at", { ascending: true }),
         ])
       : [{ data: [] as LikeFila[] }, { data: [] as ComentarioFila[] }];
@@ -401,6 +412,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       comentarios: (comentarios.data ?? []) as ComentarioFila[],
       conteos: mapaConteos,
     }));
+    setHayMasPosts((posts.data ?? []).length >= POSTS_INICIALES);
     setHidratado(true);
   }, [parche]);
 
@@ -541,6 +553,10 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "post_likes" }, (p) => {
         const l = p.new as LikeFila;
         parche((prev) => (prev.likes.some((x) => x.post_id === l.post_id && x.user_id === l.user_id) ? {} : { likes: [...prev.likes, l] }));
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "post_likes" }, (p) => {
+        const l = p.new as LikeFila;
+        parche((prev) => ({ likes: prev.likes.map((x) => (x.post_id === l.post_id && x.user_id === l.user_id ? { ...x, reaction: l.reaction } : x)) }));
       })
       .on("postgres_changes", { event: "DELETE", schema: "public", table: "post_likes" }, (p) => {
         const l = p.old as Partial<LikeFila>;
@@ -1226,26 +1242,77 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     [intentar, parche],
   );
 
-  const alternarLikePost = useCallback(
-    async (postId: string) => {
+  const reaccionarPost = useCallback(
+    async (postId: string, tipo: ReaccionId | null) => {
       const yo = exigirSesion();
       if (!yo) return;
-      const tiene = crudoRef.current.likes.some((l) => l.post_id === postId && l.user_id === yo);
+      const previa = crudoRef.current.likes.find((l) => l.post_id === postId && l.user_id === yo);
+      if (previa ? previa.reaction === tipo : tipo === null) return; // nada que cambiar
+      const esMia = (l: LikeFila) => l.post_id === postId && l.user_id === yo;
       parche((prev) => ({
-        likes: tiene ? prev.likes.filter((l) => !(l.post_id === postId && l.user_id === yo)) : [...prev.likes, { post_id: postId, user_id: yo }],
+        likes: tipo === null ? prev.likes.filter((l) => !esMia(l)) : previa ? prev.likes.map((l) => (esMia(l) ? { ...l, reaction: tipo } : l)) : [...prev.likes, { post_id: postId, user_id: yo, reaction: tipo }],
       }));
-      const { error } = tiene
-        ? await supabase().from("post_likes").delete().eq("post_id", postId).eq("user_id", yo)
-        : await supabase().from("post_likes").insert({ post_id: postId, user_id: yo });
+      const { error } =
+        tipo === null
+          ? await supabase().from("post_likes").delete().eq("post_id", postId).eq("user_id", yo)
+          : previa
+            ? await supabase().from("post_likes").update({ reaction: tipo }).eq("post_id", postId).eq("user_id", yo)
+            : await supabase().from("post_likes").insert({ post_id: postId, user_id: yo, reaction: tipo });
       if (error) {
         parche((prev) => ({
-          likes: tiene ? [...prev.likes, { post_id: postId, user_id: yo }] : prev.likes.filter((l) => !(l.post_id === postId && l.user_id === yo)),
+          likes: previa ? (prev.likes.some(esMia) ? prev.likes.map((l) => (esMia(l) ? previa : l)) : [...prev.likes, previa]) : prev.likes.filter((l) => !esMia(l)),
         }));
         notificarError(mensajeDeError(error));
       }
     },
     [exigirSesion, parche, notificarError],
   );
+
+  /** El «me gusta» de siempre: pone 👍 o, si ya reaccionaste con lo que sea, lo quita. */
+  const alternarLikePost = useCallback(
+    async (postId: string) => {
+      const yo = uidRef.current;
+      const tiene = !!yo && crudoRef.current.likes.some((l) => l.post_id === postId && l.user_id === yo);
+      await reaccionarPost(postId, tiene ? null : "like");
+    },
+    [reaccionarPost],
+  );
+
+  const cargarMasPosts = useCallback(async (): Promise<boolean> => {
+    if (cargandoPosts.current || !haySupabase) return false;
+    cargandoPosts.current = true;
+    try {
+      const cursor = crudoRef.current.posts.reduce<string | null>((min, p) => (min === null || p.created_at < min ? p.created_at : min), null);
+      if (!cursor) {
+        setHayMasPosts(false);
+        return false;
+      }
+      const sb = supabase();
+      const { data, error } = await sb.from("posts").select("*").order("created_at", { ascending: false }).lt("created_at", cursor).limit(LOTE_POSTS);
+      if (error) throw error;
+      const nuevos = (data ?? []) as PostFila[];
+      if (nuevos.length > 0) {
+        const ids = nuevos.map((p) => p.id);
+        const [likes, comentarios] = await Promise.all([
+          sb.from("post_likes").select("post_id, user_id, reaction").in("post_id", ids),
+          sb.from("post_comments").select("*").in("post_id", ids).order("created_at", { ascending: true }),
+        ]);
+        parche((prev) => ({
+          posts: [...prev.posts, ...nuevos.filter((n) => !prev.posts.some((p) => p.id === n.id))],
+          likes: [...prev.likes, ...((likes.data ?? []) as LikeFila[]).filter((l) => !prev.likes.some((x) => x.post_id === l.post_id && x.user_id === l.user_id))],
+          comentarios: [...prev.comentarios, ...((comentarios.data ?? []) as ComentarioFila[]).filter((c) => !prev.comentarios.some((x) => x.id === c.id))],
+        }));
+      }
+      const quedan = nuevos.length === LOTE_POSTS;
+      setHayMasPosts(quedan);
+      return quedan;
+    } catch (e) {
+      notificarError(mensajeDeError(e));
+      return false;
+    } finally {
+      cargandoPosts.current = false;
+    }
+  }, [parche, notificarError]);
 
   const comentarPost = useCallback(
     async (postId: string, texto: string) => {
@@ -1446,6 +1513,9 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       publicarPost,
       eliminarPost,
       alternarLikePost,
+      reaccionarPost,
+      cargarMasPosts,
+      hayMasPosts,
       comentarPost,
       leerNotificaciones,
       checkin,
@@ -1468,7 +1538,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     cerrarSesion, pasarAnuncio, alternarGuardada, conectarAnuncio, eliminarListing, publicarPropiedad, publicarVehiculo, publicarNegocio, publicarDemanda,
     pasarPersona, likePersona, superLikePersona, solicitarAmistad, responderSolicitud, abrirChatDirecto, cargarChat, suscribirEscritura, avisarEscribiendo,
     enviarMensaje, hacerOferta, enviarCotizacion, responderOferta, leer, contratarServicio, postularVacante, publicarServicio, publicarVacante,
-    editarPerfil, publicarPost, eliminarPost, alternarLikePost, comentarPost, leerNotificaciones, checkin, girarRuleta, canjearBoost,
+    editarPerfil, publicarPost, eliminarPost, alternarLikePost, reaccionarPost, cargarMasPosts, hayMasPosts, comentarPost, leerNotificaciones, checkin, girarRuleta, canjearBoost,
     canjearSuperLikes, canjearTirada, reclamarMision, sacarCartaDelDia, hacerTiradaPremium, enviarKyc, reiniciar,
     completarOnboarding, recargarPerfilPropio, recargarMonedero,
   ]);

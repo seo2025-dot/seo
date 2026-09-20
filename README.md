@@ -35,6 +35,8 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
    > **¿Tu base ya tenía la 002?** Ejecuta además `supabase/update_003_conexion_viral.sql` (perfil académico, recomendaciones, referidos y retos diarios; idempotente).
    >
    > **¿Y la 003?** Ejecuta `supabase/update_004_pareja_ideal.sql` (valores, pareja ideal estructurada y afinidad con desglose por categoría; idempotente). Aplícala **antes** de desplegar la app: el perfil y las recomendaciones leen sus columnas nuevas.
+   >
+   > **¿Y la 004?** Ejecuta `supabase/update_005_comunidad_viva.sql` (reacciones, miembros recientes, Top Conectores y avisos sociales; idempotente). También **antes** de desplegar: la portada llama a sus funciones.
 4. *(Opcional)* ejecuta `supabase/seed_personas.sql`: **5 personas de demostración de Ecuador** (Cuenca, Quito y Guayaquil) con retrato y escenas de su ciudad; requiere haber aplicado también `update_003_conexion_viral.sql` y `update_004_pareja_ideal.sql` (ver [Persona Engine](#persona-engine-simulación-de-personas)).
 5. Hazte administrador (para revisar KYC y usar el Persona Engine), sustituyendo tu correo tras registrarte:
    ```sql
@@ -63,6 +65,7 @@ supabase/                              ── BASE DE DATOS
 ├── update_002_fotos_onboarding.sql    Solo lo nuevo: fotos, onboarding, simulador (para bases ya creadas)
 ├── update_003_conexion_viral.sql      Perfil académico, recomendaciones, referidos, retos diarios, métricas
 ├── update_004_pareja_ideal.sql        Valores, pareja ideal estructurada y afinidad por categoría
+├── update_005_comunidad_viva.sql      Reacciones, miembros recientes, Top Conectores y avisos sociales
 ├── seed.sql / seed_personas.sql       Datos de demostración (generados)
 ├── seed/                              Datos en TypeScript + generadores (generate.ts, personas.ts = Persona Engine)
 └── tests/                             Pruebas: db.test.mjs, media.test.mjs, ui-logica.test.mjs
@@ -119,6 +122,17 @@ Todo vive en `supabase/update_004_pareja_ideal.sql` (idempotente; ya incluido al
 - **Reparto de los 100 puntos**: 25 texto de pareja ideal ↔ perfil · 10 reciprocidad del texto · 15 valores · 12 estilo de vida · 10 tipo de relación · 9 universidad (6) y colegio (3) · 6 intereses · 6 zona · 7 afinidad astral. Un 100 % exige encaje total. Las respuestas solo llevan porcentajes y motivos genéricos, nunca lo que la otra persona marcó.
 - **Tarjetas**: `/explorar` (`TarjetaAfinidad`) y `/citas` (`ContenidoPersona`, con el orden del mazo por afinidad real) muestran el porcentaje total y las tres barras por categoría (`BarrasAfinidad`).
 - **Completado del perfil** (`src/lib/completitud.ts`): fotos 20 (3 = completo) · biografía 15 (60 caracteres) · zona 15 · intereses y estilo de vida 15 · descripción de pareja ideal 15 (20 caracteres, como el servidor) · «qué buscas exactamente» 20. La barra («X % completado») aparece en el perfil, en el botón «Editar información», en la cabecera fija del formulario (se actualiza mientras escribes) y como aviso en `/explorar`.
+
+### Portada y comunidad viva (actualización 005)
+Todo lo de servidor vive en `supabase/update_005_comunidad_viva.sql` (idempotente; ya incluido al final de `schema.sql`). **Todas las cifras y personas que se muestran son reales**: no hay contadores ni perfiles inventados (los perfiles demo quedan fuera de miembros recientes y del ranking).
+
+- **Orden de la portada** (`src/app/page.tsx`): 1) *Explora tu ciudad a un toque* (categorías, buscador y prueba social) → 2) *Miembros recientes* → 3) muro de la comunidad con columna lateral en escritorio → *Qué es*.
+- **Miembros recientes** (`MiembrosRecientes`, RPC `recent_members()`): las últimas personas que se unieron (solo nombre de pila, ciudad y foto), con rotación suave cada 4 s. Se pausa al pasar el ratón o enfocar y no se anima con «reducir movimiento».
+- **Muro con carga infinita** (`MuroHome`): publicaciones con **reacciones rápidas** (👍 ❤️ 😂 😮 👏, columna `post_likes.reaction`), comentarios y enlaces clicables (solo http/https). Se revelan de 8 en 8 al acercarte al final; cuando se agotan las descargadas, `cargarMasPosts()` pide lotes de 20 más antiguas al servidor. Tras 6 cargas automáticas seguidas aparece «Ver más publicaciones» para que el pie de página siga alcanzable.
+- **Bloques intercalados** (`src/lib/comunidad.ts` → `POSICION_BLOQUE`): *Personas que quizá conozcas* (carrusel con la afinidad real de `recommend_people` y «Agregar a amigos») tras la 3.ª publicación, invitación con monedas tras la 6.ª, *Top Conectores* tras la 8.ª y ofertas tras la 10.ª. En escritorio, invitación y ranking van en la columna lateral (junto a *Hoy depende de ti* y las tendencias).
+- **Invitar por monedas** (`InvitarCTA`): enlace único `/registro?ref=…`, WhatsApp, contadores reales (invitadas, con perfil completo, monedas ganadas), próximo bono de hito y cuenta atrás del reto diario «Trae a alguien» (+30 🪙, reinicio real a medianoche UTC). Sin cifras inventadas.
+- **Fama: «Top Conector»** (`top_connectors()`, `my_connector_status()`, `ConectoresDestacados`, `TopConectorBadge`): ranking de los últimos 30 días con topes por categoría (publicar +3 máx. 30 · reacciones recibidas +1 máx. 50 · comentarios recibidos +2 máx. 40 · comentar en publicaciones ajenas +1 máx. 20 · amistades invitadas +10 máx. 100 · matches +2 máx. 20; lo propio no cuenta; mínimo 10 puntos para figurar). La insignia se ve en las publicaciones y en las sugerencias, y cada persona ve cuánto le falta. Las reglas están duplicadas en `PUNTOS_ACTIVIDAD` y un test comprueba la paridad con SQL.
+- **Notificaciones en tiempo real**: comentar o reaccionar a una publicación avisa a su autor (un aviso por persona y publicación) por `notifications` (Realtime); `AvisoVivo` muestra un aviso emergente al llegar uno nuevo y la campana del menú suma el contador.
 
 ### Persona Engine (simulación de personas)
 - `supabase/seed_personas.sql` crea **5 personas completas de Ecuador**: Emilia Vintimilla (Cuenca, restauradora y ceramista), Mariana Larrea (Quito, fundadora de café de especialidad), Génesis Villamar (Guayaquil · Puerto Santa Ana, coach de liderazgo), Sebastián Astudillo (Cuenca · Turi, violinista) y Andrés Terán (Quito · Cumbayá, ingeniero civil). Cada una trae biografía, universidad, colegio, estatura, profesión, **pareja ideal** (privada) y una galería de 5–6 fotos: el retrato (foto 0 = avatar, de pravatar.cc) y escenas reales de su ciudad (Wikimedia Commons, licencias libres; los créditos están en la cabecera del SQL y en `supabase/seed/escenas_ecuador.ts`). Todas las URLs son públicas y se verificaron con HTTP 200. Comparten universidad o colegio entre sí a propósito (Emilia y Sebastián; Mariana y Andrés) para que el motor de recomendación tenga con qué trabajar.

@@ -14,7 +14,7 @@ import { msHastaReinicio, resumenRetos } from "@/lib/retos";
  * Panel de la portada para quien ya tiene sesión: lo que de verdad está pendiente hoy (datos reales), el avance de los retos
  * y una reflexión. Enfoque estoico: se centra en lo que depende de la persona y en el tiempo real que queda hoy.
  */
-export default function PanelHoy() {
+export default function PanelHoy({ compacto = false }: { compacto?: boolean }) {
   const { estado, sesion, hidratado, noLeidosTotal } = useSocial();
   const oportunidad = useOportunidad();
   const { retos } = useRetos();
@@ -36,8 +36,8 @@ export default function PanelHoy() {
   });
 
   return (
-    <section aria-labelledby="hoy-titulo" className="mx-auto mt-8 grid max-w-6xl gap-4 px-4 lg:grid-cols-5">
-      <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm lg:col-span-3">
+    <section aria-labelledby="hoy-titulo" className={compacto ? "grid gap-4" : "mx-auto mt-8 grid max-w-6xl gap-4 px-4 lg:grid-cols-5"}>
+      <div className={`rounded-3xl border border-slate-200 bg-white p-5 shadow-sm ${compacto ? "" : "lg:col-span-3"}`}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <h2 id="hoy-titulo" className="text-xl font-black text-ink">
@@ -84,7 +84,7 @@ export default function PanelHoy() {
         )}
       </div>
 
-      <div className="flex flex-col gap-4 lg:col-span-2">
+      <div className={`flex flex-col gap-4 ${compacto ? "" : "lg:col-span-2"}`}>
         <ReflexionDelDia className="flex-1" />
         <Link href="/invitar" className="rounded-2xl border border-slate-200 bg-white p-4 text-sm transition hover:border-brand-300">
           <span className="font-bold text-ink">🌱 Tu círculo de {META_CIRCULO}</span>

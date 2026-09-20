@@ -262,6 +262,7 @@ export function mapearPosts(posts: PostFila[], likes: LikeFila[], comentarios: C
     imagen: p.image_url ?? undefined,
     ts: ms(p.created_at),
     likes: likes.filter((l) => l.post_id === p.id).map((l) => aIdApp(l.user_id, yo)),
+    reacciones: Object.fromEntries(likes.filter((l) => l.post_id === p.id).map((l) => [aIdApp(l.user_id, yo), l.reaction ?? "like"])),
     comentarios: comentarios
       .filter((c) => c.post_id === p.id)
       .map<Comentario>((c) => ({ id: c.id, autorId: aIdApp(c.author_id, yo), texto: c.body, ts: ms(c.created_at) }))
