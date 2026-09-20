@@ -14,6 +14,15 @@ const COLUMNAS: { titulo: string; enlaces: { href: string; label: string }[] }[]
     ],
   },
   {
+    titulo: "Directorio",
+    enlaces: [
+      { href: "/directorio", label: "Todo el directorio" },
+      { href: "/directorio/delivery", label: "Delivery" },
+      { href: "/directorio/salud", label: "Farmacias y salud" },
+      { href: "/directorio/mi-negocio/nuevo", label: "Registrar mi negocio" },
+    ],
+  },
+  {
     titulo: "conectari.com",
     enlaces: [
       { href: "/que-es", label: "¿Qué es conectari.com?" },

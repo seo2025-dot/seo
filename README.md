@@ -37,6 +37,10 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
    > **¿Y la 003?** Ejecuta `supabase/update_004_pareja_ideal.sql` (valores, pareja ideal estructurada y afinidad con desglose por categoría; idempotente). Aplícala **antes** de desplegar la app: el perfil y las recomendaciones leen sus columnas nuevas.
    >
    > **¿Y la 004?** Ejecuta `supabase/update_005_comunidad_viva.sql` (reacciones, miembros recientes, Top Conectores y avisos sociales; idempotente). También **antes** de desplegar: la portada llama a sus funciones.
+   >
+   > **¿Y la 005?** Ejecuta `supabase/update_006_directorios.sql` (directorios de Movilidad, Delivery, Salud, Eventos, Mascotas y Hogar; idempotente). Sus pantallas (`/directorio`) llegan con la Fase 1 (ver abajo).
+   >
+   > **¿Y la 006?** Ejecuta `supabase/update_007_buscador_universal.sql` (buscador universal del directorio: negocios y lo que venden, sin distinguir acentos). Aplica **006 y 007 antes de desplegar** la app: el directorio, la portada y el alta llaman a sus funciones y a las tablas nuevas.
 4. *(Opcional)* ejecuta `supabase/seed_personas.sql`: **5 personas de demostración de Ecuador** (Cuenca, Quito y Guayaquil) con retrato y escenas de su ciudad; requiere haber aplicado también `update_003_conexion_viral.sql` y `update_004_pareja_ideal.sql` (ver [Persona Engine](#persona-engine-simulación-de-personas)).
 5. Hazte administrador (para revisar KYC y usar el Persona Engine), sustituyendo tu correo tras registrarte:
    ```sql
@@ -66,6 +70,8 @@ supabase/                              ── BASE DE DATOS
 ├── update_003_conexion_viral.sql      Perfil académico, recomendaciones, referidos, retos diarios, métricas
 ├── update_004_pareja_ideal.sql        Valores, pareja ideal estructurada y afinidad por categoría
 ├── update_005_comunidad_viva.sql      Reacciones, miembros recientes, Top Conectores y avisos sociales
+├── update_006_directorios.sql         Directorios: perfiles, menús, pedidos, solicitudes/ofertas, eventos y entradas, reseñas, moderación
+├── update_007_buscador_universal.sql  Buscador universal del directorio (negocios y productos) y búsqueda sin acentos
 ├── seed.sql / seed_personas.sql       Datos de demostración (generados)
 ├── seed/                              Datos en TypeScript + generadores (generate.ts, personas.ts = Persona Engine)
 └── tests/                             Pruebas: db.test.mjs, media.test.mjs, ui-logica.test.mjs
@@ -133,6 +139,18 @@ Todo lo de servidor vive en `supabase/update_005_comunidad_viva.sql` (idempotent
 - **Invitar por monedas** (`InvitarCTA`): enlace único `/registro?ref=…`, WhatsApp, contadores reales (invitadas, con perfil completo, monedas ganadas), próximo bono de hito y cuenta atrás del reto diario «Trae a alguien» (+30 🪙, reinicio real a medianoche UTC). Sin cifras inventadas.
 - **Fama: «Top Conector»** (`top_connectors()`, `my_connector_status()`, `ConectoresDestacados`, `TopConectorBadge`): ranking de los últimos 30 días con topes por categoría (publicar +3 máx. 30 · reacciones recibidas +1 máx. 50 · comentarios recibidos +2 máx. 40 · comentar en publicaciones ajenas +1 máx. 20 · amistades invitadas +10 máx. 100 · matches +2 máx. 20; lo propio no cuenta; mínimo 10 puntos para figurar). La insignia se ve en las publicaciones y en las sugerencias, y cada persona ve cuánto le falta. Las reglas están duplicadas en `PUNTOS_ACTIVIDAD` y un test comprueba la paridad con SQL.
 - **Notificaciones en tiempo real**: comentar o reaccionar a una publicación avisa a su autor (un aviso por persona y publicación) por `notifications` (Realtime); `AvisoVivo` muestra un aviso emergente al llegar uno nuevo y la campana del menú suma el contador.
+
+### Directorios colaborativos (actualización 006)
+Seis secciones nuevas de uso diario donde **la comunidad publica el contenido**: *Movilidad* (taxis y mandados), *Delivery*, *Farmacias y salud*, *Eventos y entradas*, *Mascotas* y *Servicios del hogar*. Un solo núcleo (`providers`, catálogo, pedidos, solicitudes con ofertas, eventos, reseñas y moderación) parametrizado por sección; el catálogo que configura la interfaz está en `src/data/directorio.ts`.
+
+**Fase 1 hecha para Delivery y Farmacias** (las otras secciones se activan con `activa: true` en el catálogo):
+- **Hub** `/directorio`: buscador universal, secciones con cifras reales, farmacias de turno y negocios abiertos ahora.
+- **Listados** `/directorio/delivery` y `/directorio/salud` (alias `/delivery`, `/farmacias`): filtros en la URL (categoría, zona, abierto ahora, a domicilio, verificados, de turno), paginación y estados vacíos.
+- **Fichas** `/directorio/<sección>/<slug>`: carta o productos, horario, turnos, reseñas, datos estructurados para Google; el contacto solo se ve con sesión.
+- **Buscador universal**: en la portada (pestañas Inmuebles · Comida · Farmacias · Todo) y en `/directorio/buscar`; «paracetamol» encuentra las farmacias que lo tienen y su precio.
+- **Alta guiada** `/directorio/mi-negocio/nuevo` (6 pasos, con borrador y vista previa) y **panel** `/directorio/mi-negocio`: editar datos, fotos, horario, catálogo y turnos, pausar o eliminar. Publicar el primer negocio da +30 🪙.
+
+Probado: 58 pruebas de base de datos (`supabase/tests/directorios.test.mjs`, incluido el flujo real de alta y edición) y 29 de lógica de interfaz (`supabase/tests/directorio-ui.test.mjs`). Los pedidos con carrito y las solicitudes con ofertas son la Fase 2. Diseño completo (modelo, flujos, rutas y componentes, pautas de autoservicio, riesgos y fases): **[docs/arquitectura-directorios.md](docs/arquitectura-directorios.md)**.
 
 ### Persona Engine (simulación de personas)
 - `supabase/seed_personas.sql` crea **5 personas completas de Ecuador**: Emilia Vintimilla (Cuenca, restauradora y ceramista), Mariana Larrea (Quito, fundadora de café de especialidad), Génesis Villamar (Guayaquil · Puerto Santa Ana, coach de liderazgo), Sebastián Astudillo (Cuenca · Turi, violinista) y Andrés Terán (Quito · Cumbayá, ingeniero civil). Cada una trae biografía, universidad, colegio, estatura, profesión, **pareja ideal** (privada) y una galería de 5–6 fotos: el retrato (foto 0 = avatar, de pravatar.cc) y escenas reales de su ciudad (Wikimedia Commons, licencias libres; los créditos están en la cabecera del SQL y en `supabase/seed/escenas_ecuador.ts`). Todas las URLs son públicas y se verificaron con HTTP 200. Comparten universidad o colegio entre sí a propósito (Emilia y Sebastián; Mariana y Andrés) para que el motor de recomendación tenga con qué trabajar.

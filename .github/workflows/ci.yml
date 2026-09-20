@@ -45,3 +45,5 @@ jobs:
       - run: npx tsx supabase/tests/ui-logica.test.mjs
       - run: npx tsx supabase/tests/media.test.mjs
       - run: npx tsx supabase/tests/db.test.mjs
+      - run: npx tsx supabase/tests/directorios.test.mjs
+      - run: npx tsx supabase/tests/directorio-ui.test.mjs
