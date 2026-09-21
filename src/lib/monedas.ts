@@ -156,6 +156,7 @@ export function textoMovimiento(motivo: string): string {
     case "refund": return `Devolución${PRECIOS_DEFECTO.find((p) => p.accion === resto) ? `: ${PRECIOS_DEFECTO.find((p) => p.accion === resto)!.etiqueta.toLowerCase()}` : ""}`;
     case "challenge": return "Reto completado";
     case "admin": return `Regalo: ${(motivo.slice(6) || "soporte").trim()}`;
+    case "admin_debit": return `Ajuste del equipo: ${(motivo.slice(12) || "corrección").trim()}`;
     case "daily_checkin": return "Bono diario";
     case "wheel": return "Ruleta";
     case "referral": return "Invitaste a alguien";

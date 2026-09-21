@@ -2,7 +2,7 @@
 
 > **Estado.** Programado y probado (actualización `update_010_monedas.sql`): tarifas de uso con **3 usos gratis por acción**, tienda de monedas
 > (**$0.50 · $1.50 · $3.50**), retos para ganar monedas sin pagar y todo el flujo de pago con PayPhone y PayPal. Lo único que falta para cobrar
-> de verdad son **las credenciales de cada pasarela** (ver §5). Sin ellas la tienda muestra «Próximamente» en esa pasarela y nada se rompe.
+> de verdad son **las credenciales de cada pasarela** (ver §6). Sin ellas la tienda muestra «Próximamente» en esa pasarela y nada se rompe.
 
 ## 1. La idea
 
@@ -26,7 +26,7 @@ $8, frente al 20–30 % de las apps de reparto), pedir o reservar cuesta como mu
 mensajes. Es lo bastante barato para que nadie se lo piense y lo bastante frecuente para que un negocio con actividad recargue cada semana.
 
 Todo se ajusta **sin tocar el código**: `coin_prices` (usos gratis, coste, activar/desactivar), `coin_packages` (precio y monedas de cada paquete),
-`coin_settings` (bonificación de la primera compra: +25 %) y `coin_challenges` (retos y premios) son tablas que un administrador edita en el SQL Editor.
+`coin_settings` (bonificación de la primera compra: +25 %) y `coin_challenges` (retos y premios) son tablas que un administrador edita desde el panel `/admin/monedas` (§4) o, si prefiere, en el SQL Editor.
 
 ### Paquetes
 
@@ -90,15 +90,31 @@ Pantallas: `/monedas` (saldo, usos gratis, tienda, retos, movimientos) y `/moned
 Código: `src/lib/pagos/{payphone,paypal,flujo,config,tipos}.ts` (sin Next ni Supabase: reciben `fetch` y sus dependencias, y se prueban con pasarelas
 simuladas en `supabase/tests/pagos.test.mjs`), `src/lib/pagos/servidor.ts` y `src/lib/supabase/admin.ts` (cableado real) y `src/app/api/pagos/**` (rutas finas).
 
-## 4. Pruebas
+## 4. Panel de administración (`/admin/monedas`)
 
-`supabase/tests/monedas.test.mjs` (28, PostgreSQL real): tarifas, 3 gratis y cobro desde el cuarto en cada acción, devoluciones, mensajes de citas
+Solo para quienes están en `app_admins` (la pantalla lo comprueba y, además, **cada función `admin_*` de la base de datos vuelve a comprobar `is_admin()`**:
+las tablas de tarifas, paquetes y ajustes no tienen ninguna escritura desde el navegador). Acceso: tu perfil > «Administrar monedas».
+
+| Pestaña | Qué permite |
+|---|---|
+| Resumen | Ingresos, ticket medio, compradores y % que repite, ingreso por persona, monedas en circulación / emitidas / gastadas, **rotación** (gastadas ÷ emitidas: si es baja la gente acumula sin usar), ingresos por día, de dónde salen las monedas, en qué se gastan y ventas por pasarela y paquete (7, 30 o 90 días, en hora de Ecuador) |
+| Ventas | Todos los pagos con filtro por estado, persona, importe, pasarela, referencias y el motivo si falló (importe distinto, cancelado…) para resolver reclamos |
+| Tarifas y paquetes | Editar usos gratis y coste de cada acción (o apagarla), crear y editar paquetes (precio, monedas, etiqueta, activo), la bonificación de la primera compra y la meta y el premio de cada reto |
+| Personas | Buscar por nombre, @usuario, correo o id; ver saldo, usos, pagos y movimientos; **sumar o restar monedas con un motivo obligatorio** (no deja el saldo en negativo) |
+| Registro | Quién cambió qué y cuándo, con el antes y el después |
+
+Notas: un cambio de precio de un paquete **no altera los pagos ya iniciados** (cada pago guarda su importe y sus monedas); los ajustes de saldo quedan en el
+historial de la persona (`admin:…` / `admin_debit:…`) y en el registro; el correo solo lo ve el administrador.
+
+## 5. Pruebas
+
+`supabase/tests/monedas.test.mjs` (38, PostgreSQL real): tarifas, 3 gratis y cobro desde el cuarto en cada acción, devoluciones, mensajes de citas
 (paridad TypeScript↔SQL), destacar, regalos de admin, retos (progreso, cobro único, semana siguiente), tienda (importe fijado por el servidor, solo
-`service_role` acredita, idempotencia, importes falsos, referencias repetidas) y la migración 010.
-`supabase/tests/pagos.test.mjs` (34): forma exacta de cada llamada a PayPhone y PayPal, acreditación solo con lo confirmado, firma del webhook,
+`service_role` acredita, idempotencia, importes falsos, referencias repetidas) el panel de administración (permisos, estadísticas que cuadran con los datos, paridad de las validaciones, auditoría) y las migraciones 010 y 011.
+`supabase/tests/pagos.test.mjs` (38): forma exacta de cada llamada a PayPhone y PayPal, acreditación solo con lo confirmado, firma del webhook,
 configuración y lógica de monedas de la interfaz.
 
-## 5. Qué hace falta para cobrar de verdad
+## 6. Qué hace falta para cobrar de verdad
 
 **PayPhone** (Botón de pagos, Ecuador): en [PayPhone Business](https://www.payphone.app/) crea una aplicación de tipo *Web* y copia
 `PAYPHONE_TOKEN` (token de la aplicación) y `PAYPHONE_STORE_ID`; en «URL de respuesta» registra `https://TU-DOMINIO/api/pagos/payphone/retorno`.

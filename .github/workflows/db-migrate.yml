@@ -9,7 +9,7 @@ on:
       archivo:
         description: Actualización a aplicar
         required: true
-        default: supabase/update_010_monedas.sql
+        default: supabase/update_011_admin_monedas.sql
         type: choice
         options:
           - supabase/update_002_fotos_onboarding.sql
@@ -21,6 +21,7 @@ on:
           - supabase/update_008_pedidos.sql
           - supabase/update_009_eventos.sql
           - supabase/update_010_monedas.sql
+          - supabase/update_011_admin_monedas.sql
 
 jobs:
   migrar:

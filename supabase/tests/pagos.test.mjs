@@ -10,6 +10,7 @@ import {
   BONO_PRIMERA_COMPRA_PCT, PAQUETES_DEFECTO, PRECIOS_DEFECTO, ahorroFrente, bonoPrimeraCompra, costeMensaje, detalleSaldo, dolares, esMensajeDeMonedas, esSaldoInsuficiente, estadoUso, mensajeSaldoInsuficiente,
   mensajesHastaCobro, textoCoste, textoMonedas, textoMovimiento,
 } from "@/lib/monedas";
+import { ORIGEN_MONEDAS, alturasBarras, dolaresACentavos, mensajeErrorAdmin, resumenEconomia, textoLog, validarAjuste, validarPaquete } from "@/lib/adminMonedas";
 import { mensajeErrorPedido } from "@/lib/directorio/pedidos";
 import { mensajeErrorSolicitud } from "@/lib/directorio/solicitudes";
 import { mensajeErrorEventos } from "@/lib/directorio/eventos";
@@ -392,6 +393,53 @@ await test("textoMovimiento: cada motivo del historial se lee en español", () =
   assert.equal(textoMovimiento("admin:beta tester"), "Regalo: beta tester");
   for (const m of ["daily_checkin", "wheel", "referral", "referred_welcome", "mission:perfil", "daily:checkin", "boost", "directory_first_provider", "referral_milestone:5"]) assert.notEqual(textoMovimiento(m), "Movimiento", m);
   assert.equal(textoMovimiento("cosa_rara"), "Movimiento");
+});
+
+// ── Panel de administración (lógica) ────────────────────────────────────────
+console.log("\nPanel de administración: resumen y textos");
+const statsBase = () => ({
+  dias: 30, ventas: { pagos: 4, centavos: 1000, monedas: 800, bonificadas: 100, pendientes: 1, fallidos: 0, cancelados: 2 }, por_pasarela: [], por_paquete: [], ajustes: { first_purchase_bonus_pct: 25 },
+  compradores: { periodo: 3, total: 4, repetidores: 1 }, usuarios: 100, circulacion: 5000, emitidas: { compras: 800, retos: 600, bonos: 400, invitaciones: 200 },
+  gastadas: [{ accion: "order_accept", monedas: 300, usos: 60 }, { accion: "order_place", monedas: 100, usos: 100 }], diario: [{ dia: "2026-06-01", centavos: 0, pagos: 0 }, { dia: "2026-06-02", centavos: 500, pagos: 2 }, { dia: "2026-06-03", centavos: 250, pagos: 1 }],
+});
+await test("resumenEconomia: ingresos, ticket medio, conversión, repetición, % gratis y rotación", () => {
+  const r = resumenEconomia(statsBase());
+  assert.deepEqual([r.ingresos, r.ticketMedio, r.conversionPct, r.repeticionPct], ["$10.00", "$2.50", 3, 25]);
+  assert.deepEqual([r.emitidasTotal, r.gratisPct, r.gastadasTotal, r.rotacionPct], [2000, 60, 400, 20]);
+  assert.equal(r.ingresoPorUsuario, "$0.100");
+  const vacio = resumenEconomia({ ...statsBase(), ventas: { ...statsBase().ventas, pagos: 0, centavos: 0 }, usuarios: 0, emitidas: {}, gastadas: [], compradores: { periodo: 0, total: 0, repetidores: 0 } });
+  assert.deepEqual([vacio.ticketMedio, vacio.ingresoPorUsuario, vacio.conversionPct, vacio.repeticionPct, vacio.rotacionPct, vacio.gratisPct], ["—", "—", 0, 0, 0, 0], "sin datos no hay divisiones por cero");
+  assert.deepEqual(ORIGEN_MONEDAS.filter((o) => !o.gratis).map((o) => o.id), ["compras", "devoluciones"]);
+});
+await test("alturasBarras: el día más alto llena el gráfico y un día con ventas siempre se ve", () => {
+  assert.deepEqual(alturasBarras([{ centavos: 0 }, { centavos: 500 }, { centavos: 250 }]), [0, 100, 50]);
+  assert.deepEqual(alturasBarras([{ centavos: 1 }, { centavos: 1000 }]), [4, 100], "un céntimo no desaparece");
+  assert.deepEqual(alturasBarras([{ centavos: 0 }, { centavos: 0 }]), [0, 0]);
+  assert.deepEqual(alturasBarras([]), []);
+});
+await test("textoLog describe cada tipo de cambio con el antes y el después", () => {
+  assert.equal(textoLog({ accion: "price", detalle: { action: "order_accept", antes: { free: 3, cost: 5, active: true }, despues: { free: 3, cost: 7, active: true } } }), "Tarifa «Aceptar un pedido (negocio)»: cost: 5 → 7");
+  assert.equal(textoLog({ accion: "package", detalle: { id: "mini", antes: { price_cents: 50, coins: 50 }, despues: { price_cents: 60, coins: 55 } } }), "Paquete «mini»: price_cents: 50 → 60, coins: 50 → 55");
+  assert.equal(textoLog({ accion: "package_new", detalle: { id: "mega", antes: null, despues: { price_cents: 500, coins: 600 } } }), "Paquete nuevo «mega»: $5.00 → 600 monedas");
+  assert.equal(textoLog({ accion: "setting", detalle: { key: "first_purchase_bonus_pct", antes: 25, despues: 40 } }), "Ajuste «first_purchase_bonus_pct»: 25 → 40");
+  assert.equal(textoLog({ accion: "adjust", detalle: { delta: -15, motivo: "error" } }), "Ajuste de -15 monedas: error");
+  assert.equal(textoLog({ accion: "adjust", detalle: { delta: 20, motivo: "regalo" } }), "Ajuste de +20 monedas: regalo");
+  assert.equal(textoLog({ accion: "grant", detalle: { delta: 1, motivo: "hola" } }), "Regalo de 1 moneda: hola");
+  assert.equal(textoLog({ accion: "price", detalle: { action: "x", antes: { cost: 1 }, despues: { cost: 1 } } }), "Tarifa «x»: sin cambios");
+  assert.equal(textoLog({ accion: "otra", detalle: {} }), "otra");
+});
+await test("dolaresACentavos, validarPaquete, validarAjuste y mensajeErrorAdmin", () => {
+  assert.deepEqual(["0.50", "1,5", "$3.50", "1000", "0.1"].map(dolaresACentavos), [50, 150, 350, 100000, 10]);
+  for (const malo of ["", "abc", "1.234", "-1", "12345"]) assert.equal(dolaresACentavos(malo), null, malo);
+  assert.deepEqual(validarPaquete({ id: "mega", etiqueta: "Recarga mega", precio: "5", monedas: "600", insignia: "" }), {});
+  assert.deepEqual(Object.keys(validarPaquete({ id: "X", etiqueta: "", precio: "0.05", monedas: "0", insignia: "a".repeat(31) })).sort(), ["etiqueta", "id", "insignia", "monedas", "precio"]);
+  assert.deepEqual(validarAjuste({ cantidad: "+50", motivo: "regalo" }), {});
+  assert.deepEqual(validarAjuste({ cantidad: "-20", motivo: "error" }), {});
+  assert.deepEqual(Object.keys(validarAjuste({ cantidad: "0", motivo: "" })).sort(), ["cantidad", "motivo"]);
+  assert.match(mensajeErrorAdmin("Solo administradores"), /solo para administradores/);
+  assert.equal(mensajeErrorAdmin("La persona solo tiene 35 monedas"), "La persona solo tiene 35 monedas");
+  assert.match(mensajeErrorAdmin("Could not find the function public.admin_coin_stats"), /actualización 011/);
+  assert.equal(mensajeErrorAdmin("otra cosa"), "otra cosa");
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);

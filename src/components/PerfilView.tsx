@@ -134,6 +134,11 @@ export default function PerfilView({ usuarioId }: { usuarioId: string }) {
                     </Link>
                   )}
                   {esAdmin && (
+                    <Link href="/admin/monedas" className="rounded-full border border-violet-300 px-5 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50">
+                      Administrar monedas
+                    </Link>
+                  )}
+                  {esAdmin && (
                     <Link href="/admin/personas" className="rounded-full border border-violet-300 px-5 py-2 text-sm font-semibold text-violet-700 hover:bg-violet-50">
                       Personas simuladas
                     </Link>
