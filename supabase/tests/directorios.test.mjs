@@ -105,8 +105,8 @@ const perfil = async (uid, { vertical = "delivery", subtype = "restaurante", nam
 };
 const articulo = async (prov, nombre, precio, { kind = "menu_item", disponible = true, receta = false } = {}) =>
   (await q("insert into public.provider_items (provider_id, kind, name, price, available, requires_prescription) values ($1, $2, $3, $4, $5, $6) returning id", [prov, kind, nombre, precio, disponible, receta]))[0].id;
-const pedir = (uid, prov, lineas, { tipo = "delivery", dir = "Av. Solano 1-23", zona = "Centro", notas = "", pago = "cash" } = {}) =>
-  como(uid, "select public.place_order($1, $2, $3::jsonb, $4, $5, $6, $7) id", [prov, tipo, JSON.stringify(lineas), dir, zona, notas, pago]).then((r) => r[0].id);
+const pedir = (uid, prov, lineas, { tipo = "delivery", dir = "Av. Solano 1-23", zona = "Centro", notas = "", pago = "cash", tel = "0991234567" } = {}) =>
+  como(uid, "select public.place_order($1, $2, $3::jsonb, $4, $5, $6, $7, $8) id", [prov, tipo, JSON.stringify(lineas), dir, zona, notas, pago, tel]).then((r) => r[0].id);
 const avisos = (uid, clave, valor) => q("select title, body, href from public.notifications where user_id = $1 and data ->> $2 = $3 order by created_at", [uid, clave, valor]);
 
 // ── 1. Catálogo ─────────────────────────────────────────────────────────────
@@ -505,11 +505,147 @@ await test("estado del pedido: avisa a la otra parte y deja constancia en el cha
   const av = await avisos(c, "order", p);
   assert.deepEqual(av.map((a) => a.title), ["✅ Pedido aceptado", "🛵 Tu pedido va en camino"]);
   const chat = (await q("select chat_id from public.orders where id = $1", [p]))[0].chat_id;
-  assert.ok(av.every((a) => a.href === `/mensajes/${chat}`));
+  assert.ok(av.every((a) => a.href === `/directorio/pedidos/${p}`), "los avisos llevan a la pantalla del pedido");
   const sis = (await q("select body from public.messages where chat_id = $1 and kind = 'system' order by created_at", [chat])).map((m) => m.body);
   assert.ok(sis.includes("✅ Pedido aceptado") && sis.includes("🛵 Tu pedido va en camino"));
   await como(c, "select public.set_order_status($1, 'cancelled')", [p]).then(() => { throw new Error("no debía poder cancelar"); }, () => {});
 });
+
+// ── 5b. Pedidos operables (update_008): teléfono, caducidad y avisos ─────────
+console.log("\nPedidos operables (teléfono, caducidad y avisos)");
+await test("teléfono del cliente: obligatorio a domicilio, válido, y solo lo ven la persona y el negocio", async () => {
+  const c = await persona("ClienteTelefono");
+  const linea = [{ item_id: ceviche, qty: 1 }];
+  await falla(pedir(c, sabor.id, linea, { tel: "" }), /Indica un teléfono/);
+  await falla(pedir(c, sabor.id, linea, { tel: null }), /Indica un teléfono/);
+  await falla(pedir(c, sabor.id, linea, { tel: "llámame" }), /teléfono válido/);
+  await falla(pedir(c, sabor.id, linea, { tel: "12" }), /teléfono válido/);
+  const conTel = await pedir(c, sabor.id, linea, { tel: " 099 123 4567 " });
+  assert.equal((await q("select customer_phone from public.orders where id = $1", [conTel]))[0].customer_phone, "099 123 4567", "se guarda recortado");
+  assert.equal((await como(dueno, "select customer_phone from public.orders where id = $1", [conTel]))[0].customer_phone, "099 123 4567", "el negocio lo ve");
+  assert.equal((await como(c, "select customer_phone from public.orders where id = $1", [conTel]))[0].customer_phone, "099 123 4567");
+  assert.equal((await como(otro, "select customer_phone from public.orders where id = $1", [conTel])).length, 0, "nadie más");
+  // Retirar en el local: el teléfono es opcional, pero si se escribe debe ser válido.
+  const retiro = await pedir(c, sabor.id, linea, { tipo: "pickup", dir: "", tel: null });
+  assert.equal((await q("select customer_phone from public.orders where id = $1", [retiro]))[0].customer_phone, null);
+  await falla(pedir(c, sabor.id, linea, { tipo: "pickup", dir: "", tel: "abc" }), /teléfono válido/);
+  await falla(como(c, "update public.orders set customer_phone = '0000000' where id = $1", [conTel]), /permission denied/);
+});
+await test("caducidad: un pedido sin respuesta en 3 horas se cancela solo, avisa en el chat y libera el cupo", async () => {
+  const c = await persona("ClienteImpaciente2");
+  const linea = [{ item_id: ceviche, qty: 1 }];
+  const viejos = [];
+  for (let i = 0; i < 5; i++) viejos.push(await pedir(c, sabor.id, linea));
+  await falla(pedir(c, sabor.id, linea), /demasiados pedidos sin responder/);
+  await q("update public.orders set created_at = now() - interval '3 hours 1 minute' where id = any($1)", [viejos.slice(0, 3)]);
+  await q("update public.orders set created_at = now() - interval '2 hours 59 minutes' where id = $1", [viejos[3]]);
+  const nuevo = await pedir(c, sabor.id, linea); // al pedir se caducan los 3 viejos y vuelve a haber cupo
+  const estados = Object.fromEntries((await q("select id, status from public.orders where id = any($1)", [[...viejos, nuevo]])).map((r) => [r.id, r.status]));
+  assert.deepEqual(viejos.map((v) => estados[v]), ["cancelled", "cancelled", "cancelled", "placed", "placed"], "solo los de más de 3 horas");
+  assert.equal(estados[nuevo], "placed");
+  const chat = (await q("select chat_id from public.orders where id = $1", [viejos[0]]))[0].chat_id;
+  assert.ok((await q("select body from public.messages where chat_id = $1 and kind = 'system'", [chat])).some((m) => /no respondió a tiempo/.test(m.body)));
+  // Ni los aceptados ni los entregados caducan.
+  await q("update public.orders set status = 'accepted', created_at = now() - interval '9 hours' where id = $1", [viejos[4]]);
+  assert.equal((await como(c, "select public.expire_stale_orders() n"))[0].n, 0);
+  assert.equal((await q("select status from public.orders where id = $1", [viejos[4]]))[0].status, "accepted");
+});
+await test("expire_stale_orders: la bandeja del negocio también los caduca; solo afecta a quien participa; exige sesión", async () => {
+  const c1 = await persona("ClienteCaduca1");
+  const p1 = await pedir(c1, sabor.id, [{ item_id: ceviche, qty: 1 }]);
+  const otroNegocio = await perfil(await persona("DuenoOtroNegocio"), { name: "Otro negocio", channels: ["entrega"] });
+  const it = await articulo(otroNegocio.id, "Pan", 3);
+  const p2 = await pedir(c1, otroNegocio.id, [{ item_id: it, qty: 1 }]);
+  await q("update public.orders set created_at = now() - interval '4 hours' where id = any($1)", [[p1, p2]]);
+  assert.equal((await como(otro, "select public.expire_stale_orders() n"))[0].n, 0, "una persona ajena no caduca nada");
+  assert.equal((await como(dueno, "select public.expire_stale_orders() n"))[0].n >= 1, true);
+  assert.deepEqual([(await q("select status from public.orders where id = $1", [p1]))[0].status, (await q("select status from public.orders where id = $1", [p2]))[0].status], ["cancelled", "placed"], "solo los de su negocio");
+  await falla(como(null, "select public.expire_stale_orders()"), /permission denied|No autenticado/);
+  await falla(como(dueno, "select public._expire_stale_orders($1)", [dueno]), /permission denied/);
+});
+await test("avisos del pedido: llevan a /directorio/pedidos/<id>; en pedidos para retirar dicen «listo para retirar» y «retirado»", async () => {
+  const c = await persona("ClienteRetira");
+  const p = await pedir(c, sabor.id, [{ item_id: ceviche, qty: 1 }], { tipo: "pickup", dir: "", tel: null });
+  assert.equal((await avisos(dueno, "order", p))[0].href, `/directorio/pedidos/${p}`, "el negocio: nuevo pedido");
+  await como(dueno, "select public.set_order_status($1, 'accepted')", [p]);
+  await como(dueno, "select public.set_order_status($1, 'on_the_way')", [p]);
+  await como(dueno, "select public.set_order_status($1, 'delivered')", [p]);
+  const av = await avisos(c, "order", p);
+  assert.deepEqual(av.map((a) => a.title), ["✅ Pedido aceptado", "📦 Tu pedido está listo para retirar", "🎉 Pedido retirado"]);
+  assert.ok(av.every((a) => a.href === `/directorio/pedidos/${p}`));
+  const dom = await pedir(c, sabor.id, [{ item_id: ceviche, qty: 1 }]);
+  await como(dueno, "select public.set_order_status($1, 'accepted')", [dom]);
+  await como(dueno, "select public.set_order_status($1, 'on_the_way')", [dom]);
+  await como(dueno, "select public.set_order_status($1, 'delivered')", [dom]);
+  assert.deepEqual((await avisos(c, "order", dom)).map((a) => a.title), ["✅ Pedido aceptado", "🛵 Tu pedido va en camino", "🎉 Pedido entregado"]);
+});
+
+// ── 5c. Paridad carrito ↔ servidor ───────────────────────────────────────────
+console.log("\nCarrito: paridad con place_order()");
+const { cambiarCantidad, lineasParaRpc, totales, tiposDisponibles } = await import("@/lib/directorio/carrito");
+const { argumentosPedido, validarPago } = await import("@/lib/directorio/pedidos");
+const decimales = { g: await articulo(sabor.id, "Plato 19.99", 19.99), c1: await articulo(sabor.id, "Caramelo 0.10", 0.1), c2: await articulo(sabor.id, "Chicle 0.20", 0.2), e: await articulo(sabor.id, "Empanada 1.15", 1.15) };
+const INFO = { id: sabor.id, slug: sabor.slug, vertical: "delivery", nombre: "Sabor Cuencano", canales: ["local", "entrega", "retiro"], costoEnvio: 1.5, pedidoMinimo: 5 };
+const carritoDe = async (cantidades) => {
+  let c = null;
+  for (const [id, n] of Object.entries(cantidades)) {
+    const [it] = await q("select id, name, price from public.provider_items where id = $1", [id]);
+    c = cambiarCantidad(c, INFO, { id: it.id, nombre: it.name, precio: Number(it.price) }, n).carrito;
+  }
+  return c;
+};
+await test("PARIDAD: subtotal, envío y total del carrito == los que calcula place_order (decimales delicados incluidos)", async () => {
+  const casos = [
+    { [ceviche]: 2, [jugo]: 1 },
+    { [decimales.g]: 3, [decimales.c1]: 3, [decimales.c2]: 1 },
+    { [decimales.e]: 7, [decimales.c1]: 20, [decimales.g]: 1 },
+    { [decimales.g]: 20, [decimales.e]: 20, [ceviche]: 20, [decimales.c1]: 20 },
+  ];
+  for (const cantidades of casos) {
+    for (const tipo of ["delivery", "pickup"]) {
+      const c = await carritoDe(cantidades);
+      const cliente_ = await persona(`ClienteParidad${tipo}${Math.random().toString(36).slice(2, 8)}`);
+      const id = await pedir(cliente_, sabor.id, lineasParaRpc(c), { tipo, dir: tipo === "delivery" ? "Av. Solano 1-23" : "" });
+      const [o] = await q("select subtotal, delivery_fee, total from public.orders where id = $1", [id]);
+      const t = totales(c, tipo);
+      assert.deepEqual([t.subtotal, t.envio, t.total], [Number(o.subtotal), Number(o.delivery_fee), Number(o.total)], `${tipo} ${JSON.stringify(cantidades)}`);
+    }
+  }
+  assert.deepEqual(tiposDisponibles(["local", "entrega", "retiro"]), ["delivery", "pickup"]);
+});
+await test("PARIDAD: si validarPago() da el visto bueno, place_order() no rechaza por datos; si no, el servidor también rechaza", async () => {
+  const c = await carritoDe({ [ceviche]: 1 }); // 6.50: llega al mínimo de 5
+  const corto = await carritoDe({ [jugo]: 1 }); // 2.00: no llega
+  const escenarios = [
+    ["todo bien, a domicilio", pagoOk(), c],
+    ["retirar sin dirección ni teléfono", pagoOk({ tipo: "pickup", direccion: "", telefono: "" }), c],
+    ["retirar con teléfono", pagoOk({ tipo: "pickup", direccion: "", telefono: "099 123 4567" }), c],
+    ["domicilio sin dirección", pagoOk({ direccion: "" }), c],
+    ["domicilio con dirección corta", pagoOk({ direccion: "Av" }), c],
+    ["domicilio sin teléfono", pagoOk({ telefono: "" }), c],
+    ["teléfono inválido", pagoOk({ telefono: "llámame" }), c],
+    ["retirar con teléfono inválido", pagoOk({ tipo: "pickup", direccion: "", telefono: "abc" }), c],
+    ["pedido mínimo no alcanzado (domicilio)", pagoOk(), corto],
+    ["pedido mínimo no alcanzado (retirar)", pagoOk({ tipo: "pickup", direccion: "", telefono: "" }), corto],
+    ["transferencia", pagoOk({ pago: "transfer" }), c],
+  ];
+  for (const [nombre, datos, carrito] of escenarios) {
+    const clienteE = await persona(`ClienteEsc${Math.random().toString(36).slice(2, 9)}`);
+    const clienteRechaza = Object.keys(validarPago(datos, carrito)).length > 0;
+    const a = argumentosPedido(datos, carrito);
+    let servidorRechaza = false;
+    try {
+      await como(clienteE, "select public.place_order($1, $2, $3::jsonb, $4, $5, $6, $7, $8)", [a.p_provider, a.p_kind, JSON.stringify(a.p_lines), a.p_address, a.p_zone, a.p_notes, a.p_payment, a.p_phone]);
+    } catch (e) {
+      servidorRechaza = true;
+      if (!clienteRechaza) throw new Error(`«${nombre}»: el cliente lo daba por bueno y el servidor lo rechazó (${e.message})`);
+    }
+    assert.equal(servidorRechaza, clienteRechaza, `«${nombre}»: cliente ${clienteRechaza ? "rechaza" : "acepta"}, servidor ${servidorRechaza ? "rechaza" : "acepta"}`);
+  }
+});
+function pagoOk(extra = {}) {
+  return { tipo: "delivery", direccion: "Av. Solano 1-23", zona: "Centro", telefono: "099 123 4567", notas: "", pago: "cash", ...extra };
+}
 
 // ── 6. Solicitudes y ofertas («Busco» de servicios) ─────────────────────────
 console.log("\nSolicitudes y ofertas");
@@ -1008,6 +1144,47 @@ await test("MIGRACIÓN: update_007 sobre una base con 006 (dos veces) conserva p
     const r = (await m.query("select kind, item_name, item_price from public.search_directory('SUERO')")).rows;
     assert.deepEqual(r.map((x) => [x.kind, x.item_name, Number(x.item_price)]), [["item", "Suero oral", 2.5]]);
     assert.equal((await m.query("select count(*)::int n from public.search_providers('salud', p_q => 'farmacia previa')")).rows[0].n, 1);
+  } finally {
+    await m.end();
+  }
+});
+
+await test("MIGRACIÓN: update_008 sobre una base con 007 (dos veces) conserva pedidos, sustituye place_order y no toca lo demás", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-008-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-008-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 008 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_008_pedidos.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_008 difieren");
+  await server.createDatabase("migracion8");
+  const m = new pg.Client({ ...conn, database: "migracion8" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 007
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'due8@test.dev', '{\"full_name\":\"Dueno Ocho\"}'), (gen_random_uuid(), 'cli8@test.dev', '{\"full_name\":\"Cliente Ocho\"}')");
+    const [dueno8, cliente8] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    const prov = (await m.query("insert into public.providers (owner_id, vertical, subtype, name, channels) values ($1, 'delivery', 'restaurante', 'Resto Ocho', '{local,entrega}') returning id", [dueno8])).rows[0].id;
+    const item = (await m.query("insert into public.provider_items (provider_id, kind, name, price) values ($1, 'menu_item', 'Sopa', 4) returning id", [prov])).rows[0].id;
+    // Un pedido hecho con la función de la 006 (sin teléfono)
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: cliente8, role: "authenticated" })]);
+    const previo = (await m.query("select public.place_order($1, 'delivery', $2::jsonb, 'Calle 1 y 2', 'Centro', '', 'cash') id", [prov, JSON.stringify([{ item_id: item, qty: 1 }])])).rows[0].id;
+    await m.query("commit");
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.deepEqual((await m.query("select status, customer_phone, total from public.orders where id = $1", [previo])).rows.map((o) => [o.status, o.customer_phone, Number(o.total)])[0], ["placed", null, 4], "el pedido previo se conserva");
+    assert.equal((await m.query("select count(*)::int n from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and proname = 'place_order'")).rows[0].n, 1, "una sola place_order (la de 7 parámetros se elimina)");
+    assert.equal((await m.query("select pronargs from pg_proc where proname = 'place_order'")).rows[0].pronargs, 8);
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: cliente8, role: "authenticated" })]);
+    const nuevo = (await m.query("select public.place_order($1, 'delivery', $2::jsonb, 'Calle 1 y 2', 'Centro', '', 'cash', '099 111 2222') id", [prov, JSON.stringify([{ item_id: item, qty: 2 }])])).rows[0].id;
+    await m.query("commit");
+    assert.equal((await m.query("select customer_phone from public.orders where id = $1", [nuevo])).rows[0].customer_phone, "099 111 2222");
+    assert.match((await m.query("select href from public.notifications where user_id = $1 and data ->> 'order' = $2", [dueno8, nuevo])).rows[0].href, /^\/directorio\/pedidos\//);
   } finally {
     await m.end();
   }

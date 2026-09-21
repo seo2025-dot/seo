@@ -41,6 +41,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
    > **¿Y la 005?** Ejecuta `supabase/update_006_directorios.sql` (directorios de Movilidad, Delivery, Salud, Eventos, Mascotas y Hogar; idempotente). Sus pantallas (`/directorio`) llegan con la Fase 1 (ver abajo).
    >
    > **¿Y la 006?** Ejecuta `supabase/update_007_buscador_universal.sql` (buscador universal del directorio: negocios y lo que venden, sin distinguir acentos). Aplica **006 y 007 antes de desplegar** la app: el directorio, la portada y el alta llaman a sus funciones y a las tablas nuevas.
+   > **¿Y la 007?** Ejecuta `supabase/update_008_pedidos.sql` (carrito y pedidos de Delivery y Farmacias: teléfono del cliente, caducidad de pedidos sin respuesta y `place_order` con retiro en local). Aplícala antes de desplegar el carrito: cambia la firma de `place_order`.
 4. *(Opcional)* ejecuta `supabase/seed_personas.sql`: **5 personas de demostración de Ecuador** (Cuenca, Quito y Guayaquil) con retrato y escenas de su ciudad; requiere haber aplicado también `update_003_conexion_viral.sql` y `update_004_pareja_ideal.sql` (ver [Persona Engine](#persona-engine-simulación-de-personas)).
 5. Hazte administrador (para revisar KYC y usar el Persona Engine), sustituyendo tu correo tras registrarte:
    ```sql
@@ -72,6 +73,7 @@ supabase/                              ── BASE DE DATOS
 ├── update_005_comunidad_viva.sql      Reacciones, miembros recientes, Top Conectores y avisos sociales
 ├── update_006_directorios.sql         Directorios: perfiles, menús, pedidos, solicitudes/ofertas, eventos y entradas, reseñas, moderación
 ├── update_007_buscador_universal.sql  Buscador universal del directorio (negocios y productos) y búsqueda sin acentos
+├── update_008_pedidos.sql             Pedidos: teléfono del cliente, caducidad a las 3 h sin respuesta y place_order con retiro
 ├── seed.sql / seed_personas.sql       Datos de demostración (generados)
 ├── seed/                              Datos en TypeScript + generadores (generate.ts, personas.ts = Persona Engine)
 └── tests/                             Pruebas: db.test.mjs, media.test.mjs, ui-logica.test.mjs

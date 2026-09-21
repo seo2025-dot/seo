@@ -5,7 +5,14 @@
  */
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { CANALES, VERTICALES, VERTICALES_ACTIVAS, VERTICAL_POR_ID, estaAbierto, horarioValido, partesEcuador } from "@/data/directorio";
+import { CANALES, ETIQUETA_ESTADO_PEDIDO, VERTICALES, VERTICALES_ACTIVAS, VERTICAL_POR_ID, estaAbierto, horarioValido, partesEcuador, transicionesPedido } from "@/data/directorio";
+import {
+  CADUCIDAD_CARRITO_MS, MAX_CANTIDAD, MAX_LINEAS, cambiarCantidad, cantidadDe, leerCarrito, lineasParaRpc, reconciliar, reemplazarNegocio, serializarCarrito, tiposDisponibles, totales, unidadesEnCarrito,
+} from "@/lib/directorio/carrito";
+import {
+  PAGOS, TTL_SIN_RESPUESTA_MS, accionesNegocio, agruparBandeja, argumentosPedido, etiquetaEstado, grupoDe, haceCuanto, carritoDesdePedido, mapearPedido, mensajeErrorPedido, puedeCancelarCliente, resumenLineas, seguimiento,
+  tiempoParaCaducar, validarPago,
+} from "@/lib/directorio/pedidos";
 import { completitudNegocio } from "@/lib/directorio/completitud";
 import { enlaceTel, enlaceWhatsapp, formatearTelefono, mensajePedido, normalizarTelefonoEC, telefonoValido } from "@/lib/directorio/contacto";
 import { FILTROS_INICIALES, TAM_PAGINA, argumentosBusqueda, consultaDesdeFiltros, consultaUniversal, filtrosActivos, filtrosDesdeParams, hrefLista } from "@/lib/directorio/filtros";
@@ -354,6 +361,229 @@ await test("integración: los alias de next.config.ts coinciden con el catálogo
   for (const v of VERTICALES_ACTIVAS) assert.ok(buscador.includes(`/directorio/${v.id}`), `el buscador universal no lleva a ${v.id}`);
   assert.ok(buscador.includes("/directorio/buscar"));
   assert.ok(buscador.includes(`nombre: "turno"`) && buscador.includes(`nombre: "abierto"`), "los filtros rápidos usan los parámetros que entiende el listado");
+});
+
+
+console.log("\nCarrito");
+const SQL_008 = fs.readFileSync(new URL("../update_008_pedidos.sql", import.meta.url), "utf8");
+const NEGOCIO = { id: "n1", slug: "sabor-cuencano-a1", vertical: "delivery", nombre: "Sabor Cuencano", canales: ["local", "entrega", "retiro"], costoEnvio: 1.5, pedidoMinimo: 5 };
+const OTRO_NEGOCIO = { ...NEGOCIO, id: "n2", slug: "otro", nombre: "Otro" };
+const prod = (id, precio, nombre = `Producto ${id}`) => ({ id, nombre, precio });
+await test("cambiarCantidad: añade, actualiza, quita, acota, no muta y avisa del conflicto entre negocios", () => {
+  const AHORA = 1_000;
+  const a = cambiarCantidad(null, NEGOCIO, prod("i1", 6.5, "Ceviche"), 2, AHORA);
+  assert.deepEqual([a.conflicto, a.limite, a.carrito.lineas, a.carrito.actualizado], [false, false, [{ itemId: "i1", nombre: "Ceviche", precio: 6.5, cantidad: 2 }], AHORA]);
+  const b = cambiarCantidad(a.carrito, NEGOCIO, prod("i2", 2), 1, 2_000);
+  assert.equal(b.carrito.lineas.length, 2);
+  assert.equal(a.carrito.lineas.length, 1, "no muta el carrito anterior");
+  assert.equal(cantidadDe(b.carrito, "i1"), 2);
+  assert.equal(cantidadDe(null, "i1"), 0);
+  assert.equal(unidadesEnCarrito(b.carrito), 3);
+  assert.equal(cambiarCantidad(b.carrito, NEGOCIO, prod("i1", 6.5), 5).carrito.lineas[0].cantidad, 5);
+  assert.equal(cambiarCantidad(b.carrito, NEGOCIO, prod("i1", 6.5), 99).carrito.lineas[0].cantidad, MAX_CANTIDAD, "tope de 20");
+  assert.equal(cambiarCantidad(b.carrito, NEGOCIO, prod("i1", 6.5), -3).carrito.lineas.length, 1, "negativo = quitar");
+  assert.equal(cambiarCantidad(b.carrito, NEGOCIO, prod("i1", 6.5), Number.NaN).carrito.lineas.length, 1, "NaN = quitar");
+  assert.equal(cambiarCantidad(b.carrito, NEGOCIO, prod("i1", 6.5), 2.9).carrito.lineas.find((l) => l.itemId === "i1").cantidad, 2, "trunca decimales");
+  const sinNada = cambiarCantidad(cambiarCantidad(b.carrito, NEGOCIO, prod("i1", 1), 0).carrito, NEGOCIO, prod("i2", 1), 0);
+  assert.equal(sinNada.carrito, null, "sin líneas no hay carrito");
+  const conflicto = cambiarCantidad(b.carrito, OTRO_NEGOCIO, prod("x", 1), 1);
+  assert.deepEqual([conflicto.conflicto, conflicto.carrito], [true, b.carrito], "de otro negocio: no cambia nada y avisa");
+  assert.equal(cambiarCantidad(b.carrito, OTRO_NEGOCIO, prod("x", 1), 0).conflicto, false, "quitar algo que no está no es conflicto");
+  const nuevo = reemplazarNegocio(OTRO_NEGOCIO, prod("x", 3), 2);
+  assert.deepEqual([nuevo.id, nuevo.lineas.length], ["n2", 1]);
+  const refrescado = cambiarCantidad(b.carrito, { ...NEGOCIO, costoEnvio: 2 }, prod("i2", 2), 3).carrito;
+  assert.equal(refrescado.costoEnvio, 2, "los datos del negocio se refrescan");
+});
+await test("cambiarCantidad: máximo de 30 productos distintos y precio/nombre actualizados al volver a añadir", () => {
+  let c = null;
+  for (let i = 0; i < MAX_LINEAS; i++) c = cambiarCantidad(c, NEGOCIO, prod(`p${i}`, 1), 1).carrito;
+  assert.equal(c.lineas.length, MAX_LINEAS);
+  const extra = cambiarCantidad(c, NEGOCIO, prod("p-extra", 1), 1);
+  assert.deepEqual([extra.limite, extra.carrito.lineas.length], [true, MAX_LINEAS]);
+  assert.equal(cambiarCantidad(c, NEGOCIO, prod("p3", 9, "Nuevo nombre"), 4).carrito.lineas.find((l) => l.itemId === "p3").precio, 9, "un producto existente sí se puede cambiar");
+});
+await test("totales: en centavos exactos, el envío solo a domicilio y el mínimo sobre el subtotal", () => {
+  let c = null;
+  c = cambiarCantidad(c, NEGOCIO, prod("a", 0.1), 3).carrito;
+  c = cambiarCantidad(c, NEGOCIO, prod("b", 0.2), 1).carrito;
+  assert.deepEqual(totales(c, "pickup"), { unidades: 4, subtotal: 0.5, envio: 0, total: 0.5, faltaMinimo: 4.5 }, "0.1 × 3 + 0.2 = 0.5 sin errores de coma flotante");
+  assert.deepEqual(totales(c, "delivery"), { unidades: 4, subtotal: 0.5, envio: 1.5, total: 2, faltaMinimo: 4.5 });
+  const grande = cambiarCantidad(c, NEGOCIO, prod("c", 6.5), 2).carrito;
+  assert.deepEqual([totales(grande, "delivery").subtotal, totales(grande, "delivery").total, totales(grande, "delivery").faltaMinimo], [13.5, 15, 0]);
+  assert.deepEqual(totales(null, "delivery"), { unidades: 0, subtotal: 0, envio: 0, total: 0, faltaMinimo: 0 });
+  const raro = cambiarCantidad(null, NEGOCIO, prod("z", 19.99), 3).carrito;
+  assert.equal(totales(raro, "pickup").subtotal, 59.97);
+});
+await test("tiposDisponibles y lineasParaRpc (nunca envía precios)", () => {
+  assert.deepEqual(tiposDisponibles(["local"]), ["pickup"]);
+  assert.deepEqual(tiposDisponibles(["entrega"]), ["delivery"]);
+  assert.deepEqual(tiposDisponibles(["local", "entrega"]), ["delivery", "pickup"]);
+  assert.deepEqual(tiposDisponibles(["retiro"]), ["pickup"]);
+  assert.deepEqual(tiposDisponibles(["visita", "en_linea"]), []);
+  const c = cambiarCantidad(null, NEGOCIO, prod("a", 3), 2).carrito;
+  assert.deepEqual(lineasParaRpc(c), [{ item_id: "a", qty: 2 }]);
+  assert.ok(!JSON.stringify(lineasParaRpc(c)).includes("3"), "ni un precio");
+  assert.equal(MAX_CANTIDAD, 20);
+  assert.equal(MAX_LINEAS, 30);
+});
+await test("leerCarrito: ida y vuelta, y desconfía de lo guardado (corrupto, caducado, manipulado)", () => {
+  const AHORA = Date.UTC(2026, 5, 1);
+  const c = cambiarCantidad(cambiarCantidad(null, NEGOCIO, prod("a", 2.5, "Jugo"), 2, AHORA).carrito, NEGOCIO, prod("b", 1), 1, AHORA).carrito;
+  assert.deepEqual(leerCarrito(serializarCarrito(c), AHORA), c);
+  assert.equal(leerCarrito(null), null);
+  assert.equal(leerCarrito("no es json"), null);
+  assert.equal(leerCarrito("[]"), null);
+  assert.equal(leerCarrito(serializarCarrito(null)), null);
+  assert.equal(leerCarrito(serializarCarrito(c), AHORA + CADUCIDAD_CARRITO_MS + 1), null, "más de una semana");
+  assert.notEqual(leerCarrito(serializarCarrito(c), AHORA + CADUCIDAD_CARRITO_MS - 1), null);
+  const mod = (f) => { const x = JSON.parse(serializarCarrito(c)); f(x); return leerCarrito(JSON.stringify(x), AHORA); };
+  assert.equal(mod((x) => (x.vertical = "hackeo")), null, "sección desconocida");
+  assert.equal(mod((x) => (x.costoEnvio = -1)), null);
+  assert.equal(mod((x) => (x.pedidoMinimo = "5")), null);
+  assert.equal(mod((x) => (x.id = "")), null);
+  assert.equal(mod((x) => (x.lineas = [])), null, "sin líneas");
+  assert.equal(mod((x) => (x.lineas = "nada")), null);
+  assert.equal(mod((x) => x.lineas[0].cantidad = 500).lineas[0].cantidad, MAX_CANTIDAD, "acota la cantidad");
+  assert.equal(mod((x) => x.lineas[0].cantidad = 0).lineas.length, 1, "descarta cantidades nulas");
+  assert.equal(mod((x) => x.lineas.push({ ...x.lineas[0] })).lineas.length, 2, "descarta duplicados");
+  assert.equal(mod((x) => (x.lineas[0].precio = Number.NaN)).lineas.length, 1, "descarta precios inválidos");
+  assert.equal(mod((x) => x.lineas.push(null, 5, "x", { itemId: 1 })).lineas.length, 2, "descarta basura");
+  assert.deepEqual(mod((x) => (x.canales = ["entrega", "teletransporte", 3])).canales, ["entrega"]);
+  assert.equal(mod((x) => { x.lineas = Array.from({ length: 80 }, (_, i) => ({ itemId: `p${i}`, nombre: "n", precio: 1, cantidad: 1 })); }).lineas.length, MAX_LINEAS);
+});
+await test("reconciliar: quita lo agotado, con receta o sin precio; actualiza precios y datos de entrega; detecta bloqueos", () => {
+  const c = cambiarCantidad(cambiarCantidad(cambiarCantidad(cambiarCantidad(null, NEGOCIO, prod("a", 2, "Jugo"), 1).carrito, NEGOCIO, prod("b", 3, "Sopa"), 2).carrito, NEGOCIO, prod("c", 4, "Pastilla"), 1).carrito, NEGOCIO, prod("d", 5, "Antibiótico"), 1).carrito;
+  const items = [
+    { id: "a", nombre: "Jugo de naranjilla", precio: 2.5, disponible: true, receta: false },
+    { id: "b", nombre: "Sopa", precio: 3, disponible: false, receta: false },
+    { id: "c", nombre: "Pastilla", precio: null, disponible: true, receta: false },
+    { id: "d", nombre: "Antibiótico", precio: 5, disponible: true, receta: true },
+  ];
+  const r = reconciliar(c, items, { activo: true, canales: ["entrega"], costoEnvio: 2, pedidoMinimo: 8 });
+  assert.deepEqual(r.carrito.lineas.map((l) => [l.itemId, l.nombre, l.precio]), [["a", "Jugo de naranjilla", 2.5]]);
+  assert.equal(r.cambios.length, 4);
+  assert.match(r.cambios[0], /cambió de \$2\.00 a \$2\.50/);
+  assert.match(r.cambios[1], /«Sopa» ya no está disponible/);
+  assert.match(r.cambios[2], /no tiene precio fijo/);
+  assert.match(r.cambios[3], /requiere receta médica/);
+  assert.deepEqual([r.carrito.costoEnvio, r.carrito.pedidoMinimo, r.carrito.canales, r.bloqueo], [2, 8, ["entrega"], null]);
+  assert.equal(reconciliar(c, [], { activo: true, canales: ["entrega"], costoEnvio: 0, pedidoMinimo: 0 }).carrito, null, "todo agotado: sin carrito");
+  assert.match(reconciliar(c, items, { activo: false, canales: ["entrega"], costoEnvio: 0, pedidoMinimo: 0 }).bloqueo, /no está disponible/);
+  assert.match(reconciliar(c, items, { activo: true, canales: ["visita"], costoEnvio: 0, pedidoMinimo: 0 }).bloqueo, /no recibe pedidos/);
+  const igual = reconciliar(cambiarCantidad(null, NEGOCIO, prod("a", 2.5, "Jugo"), 1).carrito, [{ id: "a", nombre: "Jugo", precio: 2.5, disponible: true, receta: false }], { activo: true, canales: ["entrega"], costoEnvio: 1.5, pedidoMinimo: 5 });
+  assert.deepEqual(igual.cambios, [], "sin novedades no molesta");
+});
+
+console.log("\nPedidos");
+await test("etiquetas y seguimiento: el pedido para retirar habla de «retirar» y no de «entregar»", () => {
+  assert.deepEqual([etiquetaEstado("delivery", "on_the_way").etiqueta, etiquetaEstado("pickup", "on_the_way").etiqueta], ["En camino", "Listo para retirar"]);
+  assert.deepEqual([etiquetaEstado("delivery", "delivered").etiqueta, etiquetaEstado("pickup", "delivered").etiqueta], ["Entregado", "Retirado"]);
+  for (const e of Object.keys(ETIQUETA_ESTADO_PEDIDO)) for (const t of ["delivery", "pickup"]) assert.ok(etiquetaEstado(t, e).etiqueta && etiquetaEstado(t, e).emoji, `${t}/${e}`);
+  const s = seguimiento("delivery", "preparing");
+  assert.deepEqual(s.pasos.map((p) => [p.estado, p.hecho, p.actual]), [["placed", true, false], ["accepted", true, false], ["preparing", true, true], ["on_the_way", false, false], ["delivered", false, false]]);
+  assert.equal(s.terminal, null);
+  assert.deepEqual(seguimiento("pickup", "delivered").pasos.map((p) => p.hecho), [true, true, true, true, true]);
+  assert.equal(seguimiento("pickup", "on_the_way").pasos[3].etiqueta, "Listo para retirar");
+  for (const t of ["rejected", "cancelled"]) {
+    const x = seguimiento("delivery", t);
+    assert.deepEqual([x.terminal, x.pasos.some((p) => p.hecho || p.actual)], [t, false], "sin progreso que mostrar");
+  }
+});
+await test("acciones del negocio: derivadas de la máquina de estados de SQL, con texto según entrega o retiro", () => {
+  for (const tipo of ["delivery", "pickup"]) {
+    for (const estado of Object.keys(ETIQUETA_ESTADO_PEDIDO)) {
+      const acciones = accionesNegocio(tipo, estado);
+      assert.deepEqual(acciones.map((a) => a.estado), transicionesPedido("negocio", estado), `${tipo}/${estado}`);
+      assert.ok(acciones.every((a) => a.etiqueta), "todas con texto");
+    }
+  }
+  assert.deepEqual(accionesNegocio("delivery", "placed").map((a) => [a.etiqueta, a.tono]), [["Aceptar pedido", "principal"], ["Rechazar", "peligro"]]);
+  assert.deepEqual(accionesNegocio("pickup", "accepted").map((a) => a.etiqueta), ["Empezar a preparar", "Listo para retirar", "Rechazar"]);
+  assert.deepEqual(accionesNegocio("delivery", "on_the_way").map((a) => a.etiqueta), ["Marcar entregado"]);
+  assert.deepEqual(accionesNegocio("pickup", "preparing").map((a) => a.etiqueta), ["Listo para retirar", "Marcar retirado"]);
+  assert.deepEqual(accionesNegocio("delivery", "delivered"), []);
+  assert.deepEqual([puedeCancelarCliente("placed"), puedeCancelarCliente("accepted"), puedeCancelarCliente("delivered")], [true, false, false]);
+});
+const pedidoFila = (id, estado, creado, extra = {}) => ({ id, provider_id: "n1", provider_owner_id: "d1", provider_name: "Sabor", customer_id: "c1", kind: "delivery", status: estado, subtotal: "13.00", delivery_fee: "1.50", total: "14.50", payment_method: "cash", address: "Calle 1", zone: "Centro", notes: "", customer_phone: "099 123 4567", chat_id: "ch1", created_at: new Date(creado).toISOString(), updated_at: new Date(creado + 1000).toISOString(), ...extra });
+await test("Repetir pedido: rehace el carrito con las mismas cantidades y omite lo que el negocio ya borró", () => {
+  const t = Date.UTC(2026, 5, 1, 12);
+  const linea = (n, item, nombre, precio, qty, oid = "o1") => ({ order_id: oid, line_no: n, item_id: item, name: nombre, unit_price: precio, qty });
+  const p = mapearPedido(pedidoFila("o1", "delivered", t), [linea(1, "i1", "Ceviche", "6.50", 2), linea(2, null, "Plato retirado", "3.00", 1), linea(3, "i3", "Jugo", "2.00", 3)]);
+  assert.equal(p.lineas[0].itemId, "i1");
+  assert.equal(p.lineas[1].itemId, undefined);
+  const negocio = { id: "n1", slug: "cevicheria", vertical: "delivery", nombre: "Cevichería", canales: ["entrega"], costoEnvio: 1.5, pedidoMinimo: 0 };
+  const r = carritoDesdePedido(p, negocio, t);
+  assert.equal(r.omitidos, 1);
+  assert.deepEqual(r.carrito.lineas.map((l) => [l.itemId, l.cantidad, l.precio]), [["i1", 2, 6.5], ["i3", 3, 2]]);
+  assert.equal(r.carrito.id, "n1");
+  const vacio = carritoDesdePedido(mapearPedido(pedidoFila("o2", "delivered", t), [linea(1, null, "Borrado", "1", 1, "o2")]), negocio, t);
+  assert.equal(vacio.carrito, null, "si no queda nada, no hay carrito");
+  assert.equal(vacio.omitidos, 1);
+});
+
+await test("mapearPedido y bandejas: agrupa, ordena y calcula lo que queda antes de caducar", () => {
+  const t = Date.UTC(2026, 5, 1, 12);
+  const linea = (id, n, nombre, precio, qty) => ({ order_id: id, line_no: n, name: nombre, unit_price: precio, qty });
+  const p = mapearPedido(pedidoFila("o1", "accepted", t), [linea("o1", 2, "Jugo", "2.00", 1), linea("o1", 1, "Ceviche", "6.50", 2), linea("otro", 1, "Ajeno", "1", 1)]);
+  assert.deepEqual([p.total, p.envio, p.pago, p.telefono, p.lineas.map((l) => `${l.cantidad}×${l.nombre}`)], [14.5, 1.5, "cash", "099 123 4567", ["2×Ceviche", "1×Jugo"]], "solo sus líneas, en orden");
+  assert.equal(resumenLineas(p.lineas), "2 × Ceviche, 1 × Jugo");
+  assert.equal(resumenLineas(Array.from({ length: 5 }, (_, i) => ({ nombre: `P${i}`, precio: 1, cantidad: 1 }))), "1 × P0, 1 × P1, 1 × P2 y 2 más");
+  assert.equal(mapearPedido(pedidoFila("x", "raro", t)), null);
+  assert.equal(mapearPedido(pedidoFila("x", "placed", t, { kind: "teletransporte" })), null);
+  assert.equal(mapearPedido(pedidoFila("x", "placed", t, { customer_phone: null, chat_id: null })).telefono, undefined);
+  assert.equal(mapearPedido(pedidoFila("x", "placed", t, { payment_method: "transfer" })).pago, "transfer");
+  const lista = [pedidoFila("n2", "placed", t + 5000), pedidoFila("n1", "placed", t), pedidoFila("e1", "preparing", t + 1000), pedidoFila("f1", "delivered", t - 5000, { updated_at: new Date(t + 9000).toISOString() }), pedidoFila("f2", "cancelled", t - 9000, { updated_at: new Date(t + 2000).toISOString() })].map((f) => mapearPedido(f));
+  const g = agruparBandeja(lista);
+  assert.deepEqual([g.nuevos.map((x) => x.id), g.en_curso.map((x) => x.id), g.finalizados.map((x) => x.id)], [["n1", "n2"], ["e1"], ["f1", "f2"]], "urgentes: el más antiguo primero; finalizados: el más reciente primero");
+  assert.deepEqual(["placed", "accepted", "preparing", "on_the_way", "delivered", "rejected", "cancelled"].map(grupoDe), ["nuevos", "en_curso", "en_curso", "en_curso", "finalizados", "finalizados", "finalizados"]);
+  assert.equal(tiempoParaCaducar({ estado: "placed", creado: t }, t + 3_600_000), 2 * 3_600_000);
+  assert.equal(tiempoParaCaducar({ estado: "placed", creado: t }, t + 4 * 3_600_000), 0);
+  assert.equal(tiempoParaCaducar({ estado: "accepted", creado: t }, t), null);
+  assert.equal(TTL_SIN_RESPUESTA_MS, 3 * 3_600_000);
+  assert.match(SQL_008, /interval '3 hours'/, "el mismo plazo que SQL");
+  assert.deepEqual([0, 30_000, 5 * 60_000, 3 * 3_600_000, 86_400_000, 3 * 86_400_000].map((ms) => haceCuanto(t - ms, t)), ["ahora", "ahora", "hace 5 min", "hace 3 h", "hace 1 día", "hace 3 días"]);
+});
+const cartaValida = () => cambiarCantidad(cambiarCantidad(null, NEGOCIO, prod("a", 6.5, "Ceviche"), 2).carrito, NEGOCIO, prod("b", 2, "Jugo"), 1).carrito;
+const pagoValido = (extra = {}) => ({ tipo: "delivery", direccion: "Av. Solano 1-23", zona: "Centro", telefono: "099 123 4567", notas: "", pago: "cash", ...extra });
+await test("validarPago: las mismas reglas que place_order()", () => {
+  const c = cartaValida();
+  assert.deepEqual(validarPago(pagoValido(), c), {});
+  assert.deepEqual(Object.keys(validarPago(pagoValido(), null)), ["carrito"]);
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ direccion: " a " }), c)), ["direccion"]);
+  assert.deepEqual(validarPago(pagoValido({ tipo: "pickup", direccion: "", telefono: "" }), c), {}, "retirar: ni dirección ni teléfono obligatorios");
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ telefono: "" }), c)), ["telefono"]);
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ telefono: "llámame" }), c)), ["telefono"]);
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ tipo: "pickup", direccion: "", telefono: "abc" }), c)), ["telefono"], "si se escribe, debe ser válido");
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ notas: "x".repeat(301) }), c)), ["notas"]);
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ direccion: "x".repeat(201) }), c)), ["direccion"]);
+  assert.deepEqual(Object.keys(validarPago(pagoValido({ pago: "bitcoin" }), c)), ["pago"]);
+  const sinEntrega = { ...c, canales: ["local"] };
+  assert.match(validarPago(pagoValido(), sinEntrega).tipo, /no entrega a domicilio/);
+  assert.match(validarPago(pagoValido({ tipo: "pickup" }), { ...c, canales: ["entrega"] }).tipo, /no ofrece retiro/);
+  const corto = cambiarCantidad(null, NEGOCIO, prod("j", 2), 1).carrito;
+  assert.match(validarPago(pagoValido(), corto).minimo, /te faltan \$3\.00/);
+  assert.deepEqual(validarPago(pagoValido(), { ...corto, pedidoMinimo: 0 }), {});
+});
+await test("argumentosPedido usa exactamente los parámetros de place_order() en SQL y no manda precios", () => {
+  const c = cartaValida();
+  const a = argumentosPedido(pagoValido({ notas: "  Sin picante " }), c);
+  assert.deepEqual(a, { p_provider: "n1", p_kind: "delivery", p_lines: [{ item_id: "a", qty: 2 }, { item_id: "b", qty: 1 }], p_address: "Av. Solano 1-23", p_zone: "Centro", p_notes: "Sin picante", p_payment: "cash", p_phone: "099 123 4567" });
+  const firma = /create or replace function public\.place_order\(([^)]*)\)/s.exec(SQL_008)[1];
+  const parametros = [...firma.matchAll(/\b(p_\w+)\b/g)].map((m) => m[1]);
+  assert.deepEqual(Object.keys(a).sort(), [...parametros].sort(), "los nombres deben coincidir con SQL");
+  const retiro = argumentosPedido(pagoValido({ tipo: "pickup", direccion: "Calle que no importa", telefono: "" }), c);
+  assert.deepEqual([retiro.p_kind, retiro.p_address, retiro.p_phone], ["pickup", "", null], "retirar: sin dirección y sin teléfono (null)");
+  assert.ok(!JSON.stringify(a.p_lines).includes("6.5"));
+});
+await test("mensajeErrorPedido traduce los errores del servidor", () => {
+  assert.match(mensajeErrorPedido("Tienes demasiados pedidos sin responder"), /varios pedidos esperando respuesta/);
+  assert.match(mensajeErrorPedido("Un producto ya no está disponible"), /Revisa tu carrito/);
+  assert.match(mensajeErrorPedido("«Amoxicilina» requiere receta médica y no se vende por la app"), /receta médica/);
+  assert.match(mensajeErrorPedido("No se puede pasar el pedido de placed a placed"), /ya cambió de estado/);
+  assert.match(mensajeErrorPedido("permission denied for function place_order"), /carrito se conserva/);
+  assert.equal(mensajeErrorPedido("El pedido mínimo es de 5 USD"), "El pedido mínimo es de 5 USD");
+  assert.equal(mensajeErrorPedido("algo raro"), "algo raro");
+  assert.deepEqual(Object.keys(PAGOS), ["cash", "transfer"]);
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);

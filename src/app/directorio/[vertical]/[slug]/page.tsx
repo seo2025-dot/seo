@@ -9,6 +9,7 @@ import { AvisoConfiguracion } from "@/features/directorio/Bloques";
 import ContactoProveedor from "@/features/directorio/ContactoProveedor";
 import { HorarioSemanal, InfoEntrega, ListaResenas, MenuProveedor, TurnosProveedor } from "@/features/directorio/FichaPartes";
 import { InsigniaAbierto, InsigniaTurno, InsigniaVerificado, Valoracion } from "@/features/directorio/Insignias";
+import { tiposDisponibles, type InfoNegocio } from "@/lib/directorio/carrito";
 import { textoEstadoAbierto } from "@/lib/directorio/horarios";
 import { agruparCatalogo, estaDeTurno, turnosVigentes } from "@/lib/directorio/mapeo";
 import { jsonLdProveedor, jsonLdSeguro } from "@/lib/directorio/schema";
@@ -68,6 +69,11 @@ export default async function FichaPage({ params }: { params: Params }) {
   const deTurno = estaDeTurno(turnos);
   const grupos = agruparCatalogo(items, "Otros");
   const emoji = v.subtipos.find((s) => s.id === p.subtipo)?.emoji ?? v.emoji;
+  // Se puede pedir por la app si la sección lo permite y el negocio entrega o tiene retiro/local.
+  const pedible: InfoNegocio | null =
+    v.capacidades.pedidos && p.estado === "active" && tiposDisponibles(p.canales).length > 0
+      ? { id: p.id, slug: p.slug, vertical, nombre: p.nombre, canales: p.canales, costoEnvio: p.costoEnvio, pedidoMinimo: p.pedidoMinimo }
+      : null;
   const tituloCatalogo = vertical === "delivery" ? "Menú" : vertical === "salud" ? "Productos y servicios" : "Servicios";
 
   return (
@@ -140,7 +146,7 @@ export default async function FichaPage({ params }: { params: Params }) {
                 {tituloCatalogo}
               </h2>
               {v.plantilla.aviso && <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">ℹ️ Los medicamentos con receta médica no se venden por conectari.com: aquí se muestran solo como información. Consulta siempre a tu médico o farmacéutico.</p>}
-              <MenuProveedor grupos={grupos} plural={v.plantilla.item.plural} />
+              <MenuProveedor grupos={grupos} plural={v.plantilla.item.plural} pedible={pedible} />
             </section>
 
             <section aria-labelledby="resenas-titulo" className="space-y-4">

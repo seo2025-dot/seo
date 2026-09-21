@@ -19,6 +19,7 @@ const COLUMNAS: { titulo: string; enlaces: { href: string; label: string }[] }[]
       { href: "/directorio", label: "Todo el directorio" },
       { href: "/directorio/delivery", label: "Delivery" },
       { href: "/directorio/salud", label: "Farmacias y salud" },
+      { href: "/directorio/pedidos", label: "Mis pedidos" },
       { href: "/directorio/mi-negocio/nuevo", label: "Registrar mi negocio" },
     ],
   },

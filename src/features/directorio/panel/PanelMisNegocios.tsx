@@ -28,6 +28,7 @@ export default function PanelMisNegocios() {
   const [negocios, setNegocios] = useState<Proveedor[] | null>(null);
   const [extras, setExtras] = useState<Record<string, Extras>>({});
   const [error, setError] = useState<string | null>(null);
+  const [nuevosPedidos, setNuevosPedidos] = useState(0);
 
   const cargar = useCallback(async () => {
     if (!sesion.uid || !haySupabase) return;
@@ -41,6 +42,9 @@ export default function PanelMisNegocios() {
     const lista = ((data ?? []) as FilaProveedor[]).flatMap((f) => mapearProveedor(f) ?? []);
     setNegocios(lista);
     if (lista.length === 0) return;
+    // Pedidos que esperan respuesta (si la 008 no está aplicada la consulta falla y simplemente no hay insignia).
+    const { count } = await sb.from("orders").select("id", { count: "exact", head: true }).eq("provider_owner_id", sesion.uid).eq("status", "placed");
+    setNuevosPedidos(count ?? 0);
     const ids = lista.map((n) => n.id);
     const [items, contactos] = await Promise.all([sb.from("provider_items").select("provider_id").in("provider_id", ids), sb.from("provider_contacts").select("*").in("provider_id", ids)]);
     const mapa: Record<string, Extras> = Object.fromEntries(ids.map((i) => [i, { contacto: null, items: 0 }]));
@@ -73,11 +77,23 @@ export default function PanelMisNegocios() {
           <h1 className="text-3xl font-black text-ink">Mi negocio</h1>
           <p className="text-slate-500">Los negocios que publicaste en el directorio.</p>
         </div>
-        {puedeCrear && (
-          <Link href="/directorio/mi-negocio/nuevo" className="boton-marca rounded-full px-6 py-2.5 text-sm font-bold text-white">
-            + Registrar un negocio
-          </Link>
-        )}
+        <div className="flex flex-wrap gap-2">
+          {negocios.length > 0 && (
+            <Link href="/directorio/mi-negocio/pedidos" className="relative rounded-full border border-slate-300 px-6 py-2.5 text-sm font-bold text-ink hover:border-brand-400">
+              🧾 Pedidos recibidos
+              {nuevosPedidos > 0 && (
+                <span className="absolute -right-1 -top-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-rose-500 px-1 text-[11px] font-black text-white" aria-label={`${nuevosPedidos} pedidos nuevos`}>
+                  {nuevosPedidos}
+                </span>
+              )}
+            </Link>
+          )}
+          {puedeCrear && (
+            <Link href="/directorio/mi-negocio/nuevo" className="boton-marca rounded-full px-6 py-2.5 text-sm font-bold text-white">
+              + Registrar un negocio
+            </Link>
+          )}
+        </div>
       </header>
 
       {error && (

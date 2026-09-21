@@ -2,7 +2,7 @@
 
 Diseño técnico de las seis secciones nuevas de alta frecuencia: **Movilidad (taxis y mandados), Delivery, Farmacias y salud, Eventos y entradas, Mascotas y Servicios del hogar**.
 
-> **Estado.** **Fase 0 (base de datos) y Fase 1 (interfaz) están hechas** para **Delivery y Farmacias/Salud** (`activa: true` en `src/data/directorio.ts`). Base de datos: `update_006` y `update_007`, probadas contra PostgreSQL real (58 pruebas en `supabase/tests/directorios.test.mjs`). Interfaz: hub, listados con filtros, fichas, buscador universal, alta guiada y panel «Mi negocio» (lógica probada en `supabase/tests/directorio-ui.test.mjs`). Las otras cuatro secciones ya existen en la base de datos y se activan cambiando un indicador (ver §4.5); los **pedidos con carrito y las solicitudes con ofertas (Fase 2)** siguen pendientes.
+> **Estado.** **Fases 0 (base de datos), 1 (interfaz) y 2 (carrito y pedidos) están hechas** para **Delivery y Farmacias/Salud** (`activa: true` en `src/data/directorio.ts`). Base de datos: `update_006`, `update_007` y `update_008`, probadas contra PostgreSQL real (65 pruebas en `supabase/tests/directorios.test.mjs`). Interfaz: hub, listados con filtros, fichas, buscador universal, alta guiada y panel «Mi negocio» (lógica probada en `supabase/tests/directorio-ui.test.mjs`, 42 pruebas). **Fase 2:** carrito, pago, «Mis pedidos», bandeja del negocio y seguimiento en tiempo real (ver §4.6). Las otras cuatro secciones ya existen en la base de datos y se activan cambiando un indicador (ver §4.5); las **solicitudes con ofertas (Hogar, Movilidad, Mascotas)** siguen pendientes.
 
 ---
 
@@ -205,6 +205,29 @@ src/features/directorio/
 - `/directorio/mi-negocio/*` está en la lista de rutas protegidas del middleware.
 
 **Un hallazgo de las pruebas** que conviene recordar: un índice sobre una función (`public._norm(name)`) se mantiene con los privilegios de **quien inserta**, así que esa función debe ser ejecutable por `authenticated`; sin eso publicar un perfil fallaba con «permission denied for function _norm».
+
+### 4.6 Fase 2: carrito y pedidos (Delivery y Farmacias)
+
+**Flujo.** Ficha → «+ Agregar» (solo productos disponibles, con precio fijo y sin receta) → barra flotante «🛒 3 · $12.50» → `/directorio/carrito` → `place_order()` → `/directorio/pedidos/<id>` → chat del pedido, seguimiento y reseña.
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `/directorio/carrito` | cualquiera (pagar exige sesión; el carrito se conserva al iniciar sesión) | contrasta el carrito con el catálogo actual, elige domicilio o retiro, dirección, teléfono, notas y pago |
+| `/directorio/pedidos` | cliente | «En curso» y «Anteriores», cancelar mientras nadie responda |
+| `/directorio/pedidos/[id]` | cliente o dueño del negocio | línea de tiempo, productos, datos de entrega, chat, acciones según el rol, «Repetir pedido» y reseña |
+| `/directorio/mi-negocio/pedidos` | dueño | bandeja Nuevos · En curso · Finalizados con aceptar/rechazar y avanzar de estado |
+
+**Decisiones.**
+- **El precio lo fija el servidor.** El navegador solo envía `item_id` y cantidad; `place_order()` calcula subtotal, envío y total con los precios vigentes. El total del carrito es una estimación, y una prueba compara ambos cálculos (4 carritos × domicilio/retiro, con decimales como 19.99 o 0.10) para que no diverjan.
+- **Un carrito = un negocio**, como en las apps de reparto. Agregar algo de otro negocio pregunta antes de vaciar el carrito. Vive en `localStorage` (sirve sin sesión), se comparte entre pestañas y caduca a los 7 días.
+- **Se reconcilia antes de pagar** (`reconciliar`): quita lo agotado, con receta o sin precio, actualiza precios y avisa de cada cambio; bloquea si el negocio se pausó o ya no entrega.
+- **Máquina de estados única** (`transicionesPedido` en TypeScript = `set_order_status` en SQL, con prueba de paridad): enviado → aceptado → preparando → en camino/listo para retirar → entregado, más rechazado y cancelado. La interfaz solo ofrece transiciones posibles.
+- **Sin respuesta en 3 horas, el pedido se cancela solo** (`expire_stale_orders()`, que se ejecuta al abrir la bandeja o el detalle) y se avisa en el chat. Máximo de pedidos sin responder por persona para evitar spam.
+- **Privacidad:** el negocio ve el nombre de pila, el teléfono y la dirección **solo de quienes le pidieron**; RLS limita cada pedido al cliente y al dueño.
+- **Tiempo real:** `orders` está en la publicación realtime; las listas y el detalle se recargan al cambiar.
+- **Pago:** efectivo o transferencia coordinada por chat. No hay pasarela de pago todavía.
+
+**Pendiente de la Fase 2:** solicitudes con ofertas para Hogar, Movilidad y Mascotas (las tablas y funciones ya existen; falta la interfaz y activar esas secciones), cupones con monedas y pasarela de pago.
 
 ## 5. Pautas para mantener el autoservicio
 

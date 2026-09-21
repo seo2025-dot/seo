@@ -1,14 +1,19 @@
 /* eslint-disable @next/next/no-img-element */
 import { CANALES, DIAS, ETIQUETA_DIA, partesEcuador, textoHorarioDia, type Horario } from "@/data/directorio";
 import { textoDinero, textoPrecio, type GrupoCatalogo } from "@/lib/directorio/mapeo";
+import BotonAgregar from "@/features/directorio/carrito/BotonAgregar";
 import { InsigniaTurno } from "@/features/directorio/Insignias";
+import type { InfoNegocio } from "@/lib/directorio/carrito";
 import type { Proveedor, Resena, TurnoGuardia } from "@/types/directorio";
 
 const FORMATO_TURNO = new Intl.DateTimeFormat("es-EC", { timeZone: "America/Guayaquil", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 const FORMATO_FECHA = new Intl.DateTimeFormat("es-EC", { timeZone: "America/Guayaquil", day: "numeric", month: "short", year: "numeric" });
 
-/** Catálogo agrupado por sección. Los artículos con receta se muestran solo como información. */
-export function MenuProveedor({ grupos, plural }: { grupos: GrupoCatalogo[]; plural: string }) {
+/**
+ * Catálogo agrupado por sección. Los artículos con receta se muestran solo como información.
+ * Si el negocio recibe pedidos por la app (`pedible`), cada producto disponible con precio fijo lleva su botón «Agregar».
+ */
+export function MenuProveedor({ grupos, plural, pedible = null }: { grupos: GrupoCatalogo[]; plural: string; pedible?: InfoNegocio | null }) {
   const total = grupos.reduce((n, g) => n + g.items.length, 0);
   if (total === 0) {
     return <p className="rounded-2xl bg-slate-50 p-5 text-sm text-slate-500">Este negocio aún no publicó sus {plural}. Pregúntales por WhatsApp.</p>;
@@ -30,13 +35,17 @@ export function MenuProveedor({ grupos, plural }: { grupos: GrupoCatalogo[]; plu
                     {!i.disponible && <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-bold text-rose-600">Agotado</span>}
                   </p>
                 </div>
-                <p className="shrink-0 text-right font-black tabular-nums text-ink">{textoPrecio(i)}</p>
+                <div className="flex shrink-0 flex-col items-end gap-2">
+                  <p className="font-black tabular-nums text-ink">{textoPrecio(i)}</p>
+                  {pedible && i.disponible && !i.receta && i.precio !== null && <BotonAgregar item={{ id: i.id, nombre: i.nombre, precio: i.precio }} negocio={pedible} />}
+                  {pedible && i.receta && <span className="text-[11px] font-semibold text-slate-400">No se pide por la app</span>}
+                </div>
               </li>
             ))}
           </ul>
         </section>
       ))}
-      <p className="text-xs text-slate-400">Precios en dólares y sujetos a disponibilidad. Confirma con el negocio antes de pedir.</p>
+      <p className="text-xs text-slate-400">Precios en dólares y sujetos a disponibilidad.{pedible ? " El total final lo confirma el negocio al aceptar tu pedido." : " Confirma con el negocio antes de pedir."}</p>
     </div>
   );
 }
