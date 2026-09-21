@@ -16,6 +16,19 @@ Son 4 pasos. Hazlos **en este orden** (primero la base de datos, después public
    ```
    Si no devuelve filas es que todavía no te has registrado con ese correo: regístrate en la plataforma y vuelve a ejecutarlo.
 
+### Importante: direcciones de confirmación de correo (Supabase)
+
+Si al confirmar el correo la persona acaba en `localhost` (o en `0.0.0.0`), Supabase tiene mal la dirección de la web. Corrígelo una vez:
+
+1. Supabase → tu proyecto → **Authentication** → **URL Configuration**.
+2. **Site URL**: `https://conectari.com` (sin barra final). Quita `http://localhost:3000`.
+3. **Redirect URLs** → *Add URL*: añade `https://conectari.com/**` (y `https://www.conectari.com/**` si usas www). Puedes dejar
+   `http://localhost:3000/**` solo para trabajar en tu computadora.
+4. **Save changes**.
+
+Sin esto Supabase ignora la dirección que envía la app y usa la «Site URL», que por defecto es `http://localhost:3000`. (La app, además, construye sus
+redirecciones con `NEXT_PUBLIC_SITE_URL` y no con la dirección interna del servidor: ver `src/lib/origen.ts`.)
+
 ## 2. Claves del servidor (Hostinger) — 3 minutos
 
 En [hPanel](https://hpanel.hostinger.com) abre tu sitio (la aplicación Node.js) → **Environment variables** (en el menú lateral). Las variables valen para la
