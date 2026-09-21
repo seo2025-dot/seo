@@ -50,3 +50,4 @@ jobs:
       - run: npx tsx supabase/tests/monedas.test.mjs
       - run: npx tsx supabase/tests/pagos.test.mjs
       - run: npx tsx supabase/tests/avisos.test.mjs
+      - run: npx tsx supabase/tests/renderizado.test.mjs

@@ -8,6 +8,7 @@ import GuardaOnboarding from "@/features/onboarding/GuardaOnboarding";
 import BienvenidaModal from "@/components/BienvenidaModal";
 import SaludoRecurrente from "@/components/SaludoRecurrente";
 import CapturaReferido from "@/components/CapturaReferido";
+import RecuperarDeCarga from "@/components/RecuperarDeCarga";
 import { SocialProvider } from "@/context/SocialContext";
 import { LEMA } from "@/lib/marca";
 
@@ -29,6 +30,7 @@ export default function RootLayout({
   return (
     <html lang="es" className={`${inter.variable} ${nunito.variable}`}>
       <body className="flex min-h-screen flex-col pb-16 font-sans lg:pb-0">
+        <RecuperarDeCarga />
         <SocialProvider>
           <Navbar />
           <AvisoDatos />
