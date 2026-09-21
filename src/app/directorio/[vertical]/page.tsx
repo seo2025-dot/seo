@@ -3,8 +3,10 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { VERTICAL_POR_ID, etiquetaSubtipo, type VerticalId } from "@/data/directorio";
 import { AvisoConfiguracion, EstadoVacio, InvitacionAlta, InvitacionSolicitud } from "@/features/directorio/Bloques";
+import Cartelera from "@/features/directorio/eventos/Cartelera";
 import FiltrosListado from "@/features/directorio/FiltrosLista";
 import TarjetaProveedor from "@/features/directorio/TarjetaProveedor";
+import { filtrosEventoActivos, filtrosEventoDesdeParams } from "@/lib/directorio/eventos";
 import { filtrosActivos, filtrosDesdeParams, hrefLista } from "@/lib/directorio/filtros";
 import { buscarProveedores } from "@/lib/directorio/servidor";
 
@@ -17,6 +19,14 @@ export async function generateMetadata({ params, searchParams }: { params: Param
   const { vertical } = await params;
   if (!esVertical(vertical)) return { title: "Directorio" };
   const v = VERTICAL_POR_ID[vertical];
+  if (vertical === "eventos") {
+    const fe = filtrosEventoDesdeParams(await searchParams);
+    return {
+      title: "Eventos y entradas en Cuenca",
+      description: "Conciertos, teatro, talleres y ferias de tu ciudad. Reserva tus entradas gratis y paga en la puerta.",
+      robots: filtrosEventoActivos(fe) > 0 || fe.pagina > 1 ? { index: false, follow: true } : undefined,
+    };
+  }
   const f = filtrosDesdeParams(await searchParams, vertical);
   const categoria = f.subtipo ? etiquetaSubtipo(vertical, f.subtipo) : v.etiqueta;
   return {
@@ -46,6 +56,9 @@ export default async function ListadoPage({ params, searchParams }: { params: Pa
       </div>
     );
   }
+
+  // Eventos no es un listado de negocios sino una cartelera de eventos con fecha.
+  if (vertical === "eventos") return <Cartelera filtros={filtrosEventoDesdeParams(await searchParams)} />;
 
   const filtros = filtrosDesdeParams(await searchParams, vertical);
   const { datos, error } = await buscarProveedores(vertical, filtros);

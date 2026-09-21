@@ -42,6 +42,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
    >
    > **¿Y la 006?** Ejecuta `supabase/update_007_buscador_universal.sql` (buscador universal del directorio: negocios y lo que venden, sin distinguir acentos). Aplica **006 y 007 antes de desplegar** la app: el directorio, la portada y el alta llaman a sus funciones y a las tablas nuevas.
    > **¿Y la 007?** Ejecuta `supabase/update_008_pedidos.sql` (carrito y pedidos de Delivery y Farmacias: teléfono del cliente, caducidad de pedidos sin respuesta y `place_order` con retiro en local). Aplícala antes de desplegar el carrito: cambia la firma de `place_order`.
+   > **¿Y la 008?** Ejecuta `supabase/update_009_eventos.sql` (eventos operables: cancelar un evento avisando a los asistentes, aviso al cambiar la fecha, y topes de tamaño en las solicitudes). Aplícala antes de desplegar la sección Eventos.
 4. *(Opcional)* ejecuta `supabase/seed_personas.sql`: **5 personas de demostración de Ecuador** (Cuenca, Quito y Guayaquil) con retrato y escenas de su ciudad; requiere haber aplicado también `update_003_conexion_viral.sql` y `update_004_pareja_ideal.sql` (ver [Persona Engine](#persona-engine-simulación-de-personas)).
 5. Hazte administrador (para revisar KYC y usar el Persona Engine), sustituyendo tu correo tras registrarte:
    ```sql
@@ -74,6 +75,7 @@ supabase/                              ── BASE DE DATOS
 ├── update_006_directorios.sql         Directorios: perfiles, menús, pedidos, solicitudes/ofertas, eventos y entradas, reseñas, moderación
 ├── update_007_buscador_universal.sql  Buscador universal del directorio (negocios y productos) y búsqueda sin acentos
 ├── update_008_pedidos.sql             Pedidos: teléfono del cliente, caducidad a las 3 h sin respuesta y place_order con retiro
+├── update_009_eventos.sql             Eventos: cancel_event con aviso, aviso de cambio de fecha y topes en solicitudes
 ├── seed.sql / seed_personas.sql       Datos de demostración (generados)
 ├── seed/                              Datos en TypeScript + generadores (generate.ts, personas.ts = Persona Engine)
 └── tests/                             Pruebas: db.test.mjs, media.test.mjs, ui-logica.test.mjs
@@ -145,7 +147,7 @@ Todo lo de servidor vive en `supabase/update_005_comunidad_viva.sql` (idempotent
 ### Directorios colaborativos (actualización 006)
 Seis secciones nuevas de uso diario donde **la comunidad publica el contenido**: *Movilidad* (taxis y mandados), *Delivery*, *Farmacias y salud*, *Eventos y entradas*, *Mascotas* y *Servicios del hogar*. Un solo núcleo (`providers`, catálogo, pedidos, solicitudes con ofertas, eventos, reseñas y moderación) parametrizado por sección; el catálogo que configura la interfaz está en `src/data/directorio.ts`.
 
-**Fases 1 y 2 hechas** (activas: Delivery, Farmacias, Taxis y mandados, Mascotas y Hogar; Eventos llega después y se activa con `activa: true` en el catálogo):
+**Fases 1 y 2 hechas: las 6 secciones están activas** (Delivery, Farmacias, Taxis y mandados, Eventos, Mascotas y Hogar):
 - **Hub** `/directorio`: buscador universal, secciones con cifras reales, farmacias de turno y negocios abiertos ahora.
 - **Listados** `/directorio/delivery` y `/directorio/salud` (alias `/delivery`, `/farmacias`): filtros en la URL (categoría, zona, abierto ahora, a domicilio, verificados, de turno), paginación y estados vacíos.
 - **Fichas** `/directorio/<sección>/<slug>`: carta o productos, horario, turnos, reseñas, datos estructurados para Google; el contacto solo se ve con sesión.
@@ -155,7 +157,9 @@ Seis secciones nuevas de uso diario donde **la comunidad publica el contenido**:
 - **Carrito y pedidos** (Delivery, Farmacias y tiendas de mascotas): «+ Agregar» en la carta, `/directorio/carrito`, «Mis pedidos» `/directorio/pedidos` y bandeja del negocio `/directorio/mi-negocio/pedidos`, con seguimiento en tiempo real. El precio lo calcula el servidor.
 - **Solicitudes y ofertas** (Taxis, Hogar y Mascotas): `/directorio/solicitudes`. Pides algo («fuga en el baño», «viaje al aeropuerto»), los profesionales de la categoría responden con precio y tiempo, eliges y coordinan por chat. Movilidad exige identidad verificada para ofertar.
 
-Probado: 67 pruebas de base de datos (`supabase/tests/directorios.test.mjs`, incluido el flujo real de alta y edición, y la paridad cliente↔servidor de pedidos, solicitudes y ofertas) y 52 de lógica de interfaz (`supabase/tests/directorio-ui.test.mjs`). Diseño completo (modelo, flujos, rutas y componentes, pautas de autoservicio, riesgos y fases): **[docs/arquitectura-directorios.md](docs/arquitectura-directorios.md)**.
+- **Eventos y entradas**: cartelera `/directorio/eventos` (filtros por fecha, categoría, zona y gratis; agrupada por día), página de cada evento con datos estructurados de Google, reserva de entradas con cupo atómico y código QR (`/directorio/entradas`), y panel del organizador `/directorio/mi-negocio/eventos` con tipos de entrada, lista de asistentes, control de acceso (escribiendo o escaneando el QR) y cancelación con aviso. El pago se hace en la puerta: no hay pasarela.
+
+Probado: 76 pruebas de base de datos (`supabase/tests/directorios.test.mjs`, incluido el flujo real de alta y edición, y la paridad cliente↔servidor de pedidos, solicitudes, ofertas y eventos) y 68 de lógica de interfaz (`supabase/tests/directorio-ui.test.mjs`). Diseño completo (modelo, flujos, rutas y componentes, pautas de autoservicio, riesgos y fases): **[docs/arquitectura-directorios.md](docs/arquitectura-directorios.md)**.
 
 ### Persona Engine (simulación de personas)
 - `supabase/seed_personas.sql` crea **5 personas completas de Ecuador**: Emilia Vintimilla (Cuenca, restauradora y ceramista), Mariana Larrea (Quito, fundadora de café de especialidad), Génesis Villamar (Guayaquil · Puerto Santa Ana, coach de liderazgo), Sebastián Astudillo (Cuenca · Turi, violinista) y Andrés Terán (Quito · Cumbayá, ingeniero civil). Cada una trae biografía, universidad, colegio, estatura, profesión, **pareja ideal** (privada) y una galería de 5–6 fotos: el retrato (foto 0 = avatar, de pravatar.cc) y escenas reales de su ciudad (Wikimedia Commons, licencias libres; los créditos están en la cabecera del SQL y en `supabase/seed/escenas_ecuador.ts`). Todas las URLs son públicas y se verificaron con HTTP 200. Comparten universidad o colegio entre sí a propósito (Emilia y Sebastián; Mariana y Andrés) para que el motor de recomendación tenga con qué trabajar.

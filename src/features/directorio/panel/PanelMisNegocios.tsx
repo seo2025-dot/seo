@@ -78,6 +78,11 @@ export default function PanelMisNegocios() {
           <p className="text-slate-500">Los negocios que publicaste en el directorio.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {negocios.some((n) => n.vertical === "eventos") && (
+            <Link href="/directorio/mi-negocio/eventos" className="rounded-full border border-slate-300 px-6 py-2.5 text-sm font-bold text-ink hover:border-brand-400">
+              🎟️ Mis eventos
+            </Link>
+          )}
           {negocios.some((n) => n.vertical === "movilidad" || n.vertical === "hogar" || n.vertical === "mascotas") && (
             <Link href="/directorio/solicitudes" className="rounded-full border border-slate-300 px-6 py-2.5 text-sm font-bold text-ink hover:border-brand-400">
               🙋 Solicitudes
@@ -138,7 +143,7 @@ export default function PanelMisNegocios() {
                 </div>
                 {e && (
                   <div className="mt-3">
-                    <MedidorNegocio c={completitudNegocio(n, e.contacto, Array.from({ length: e.items }, (_, i) => ({ id: String(i) })))} compacto />
+                    <MedidorNegocio c={completitudNegocio(n, e.contacto, Array.from({ length: e.items }, (_, i) => ({ id: String(i) })), v.capacidades.catalogo.length > 0)} compacto />
                   </div>
                 )}
                 <div className="mt-4 flex flex-wrap gap-2">

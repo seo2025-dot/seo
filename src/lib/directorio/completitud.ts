@@ -23,9 +23,9 @@ const acotar = (n: number) => Math.max(0, Math.min(1, n));
 
 /**
  * Qué tan completo está un negocio (100 puntos): contacto 20 · catálogo 25 (5 elementos = completo) · horario 15 ·
- * descripción 15 (60 caracteres) · logo 15 · foto de portada 10. Un negocio completo inspira confianza y sube en las búsquedas.
+ * descripción 15 (60 caracteres) · logo 15 · foto de portada 10 (sin catálogo, los demás se reescalan). Un negocio completo inspira confianza y sube en las búsquedas.
  */
-export function completitudNegocio(p: Proveedor, contacto: ContactoProveedor | null, items: Pick<ItemCatalogo, "id">[]): CompletitudNegocio {
+export function completitudNegocio(p: Proveedor, contacto: ContactoProveedor | null, items: Pick<ItemCatalogo, "id">[], conCatalogo = true): CompletitudNegocio {
   const conHorario = p.abierto24h || DIAS.some((d) => (p.horario[d] ?? []).length > 0);
   const apartados: Omit<ItemCompletitudNegocio, "hecho">[] = [
     { id: "contacto", etiqueta: "Contacto", ayuda: "Añade tu WhatsApp o teléfono", peso: 20, avance: contacto?.whatsapp || contacto?.telefono ? 1 : 0 },
@@ -35,9 +35,11 @@ export function completitudNegocio(p: Proveedor, contacto: ContactoProveedor | n
     { id: "logo", etiqueta: "Logo", ayuda: "Sube tu logo o una foto del local", peso: 15, avance: p.logoUrl ? 1 : 0 },
     { id: "portada", etiqueta: "Foto de portada", ayuda: "Una buena portada atrae más visitas", peso: 10, avance: p.portadaUrl ? 1 : 0 },
   ];
-  const lista = apartados.map((a) => ({ ...a, hecho: a.avance >= 1 }));
+  // Sin catálogo (organizadores de eventos) ese apartado no cuenta y los demás se reescalan a 100.
+  const lista = apartados.filter((a) => conCatalogo || a.id !== "catalogo").map((a) => ({ ...a, hecho: a.avance >= 1 }));
+  const total = lista.reduce((t, i) => t + i.peso, 0);
   return {
-    porcentaje: Math.round(lista.reduce((t, i) => t + i.peso * i.avance, 0)),
+    porcentaje: Math.round((lista.reduce((t, i) => t + i.peso * i.avance, 0) / total) * 100),
     items: lista,
     faltantes: lista.filter((i) => !i.hecho).sort((a, b) => b.peso * (1 - b.avance) - a.peso * (1 - a.avance)),
   };

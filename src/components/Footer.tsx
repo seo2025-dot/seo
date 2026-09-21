@@ -21,6 +21,8 @@ const COLUMNAS: { titulo: string; enlaces: { href: string; label: string }[] }[]
       { href: "/directorio/salud", label: "Farmacias y salud" },
       { href: "/directorio/pedidos", label: "Mis pedidos" },
       { href: "/directorio/solicitudes", label: "Pedir ofertas" },
+      { href: "/directorio/eventos", label: "Eventos y entradas" },
+      { href: "/directorio/entradas", label: "Mis entradas" },
       { href: "/directorio/mi-negocio/nuevo", label: "Registrar mi negocio" },
     ],
   },

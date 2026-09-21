@@ -7,13 +7,14 @@ import { VERTICAL_POR_ID, etiquetaSubtipo, rutaProveedor, type VerticalId } from
 import { AccionesDueno, BotonDenunciar, FormResena } from "@/features/directorio/AccionesFicha";
 import { AvisoConfiguracion } from "@/features/directorio/Bloques";
 import ContactoProveedor from "@/features/directorio/ContactoProveedor";
+import TarjetaEvento from "@/features/directorio/eventos/TarjetaEvento";
 import { HorarioSemanal, InfoEntrega, ListaResenas, MenuProveedor, TurnosProveedor } from "@/features/directorio/FichaPartes";
 import { InsigniaAbierto, InsigniaTurno, InsigniaVerificado, Valoracion } from "@/features/directorio/Insignias";
 import { tiposDisponibles, type InfoNegocio } from "@/lib/directorio/carrito";
 import { textoEstadoAbierto } from "@/lib/directorio/horarios";
 import { agruparCatalogo, estaDeTurno, turnosVigentes } from "@/lib/directorio/mapeo";
 import { jsonLdProveedor, jsonLdSeguro } from "@/lib/directorio/schema";
-import { obtenerFicha } from "@/lib/directorio/servidor";
+import { eventosDeOrganizador, obtenerFicha } from "@/lib/directorio/servidor";
 
 export const revalidate = 60;
 
@@ -74,6 +75,9 @@ export default async function FichaPage({ params }: { params: Params }) {
     v.capacidades.pedidos && p.estado === "active" && tiposDisponibles(p.canales).length > 0
       ? { id: p.id, slug: p.slug, vertical, nombre: p.nombre, canales: p.canales, costoEnvio: p.costoEnvio, pedidoMinimo: p.pedidoMinimo }
       : null;
+  // Los organizadores no tienen catálogo: su ficha lista los próximos eventos.
+  const conCatalogo = v.capacidades.catalogo.length > 0;
+  const proximosEventos = vertical === "eventos" ? (await eventosDeOrganizador(p.id, 6)).datos : [];
   const tituloCatalogo = vertical === "delivery" ? "Menú" : vertical === "salud" ? "Productos y servicios" : "Servicios";
 
   return (
@@ -141,6 +145,24 @@ export default async function FichaPage({ params }: { params: Params }) {
               </section>
             )}
 
+            {!conCatalogo && (
+              <section aria-labelledby="eventos-titulo">
+                <h2 id="eventos-titulo" className="mb-3 text-2xl font-black text-ink">
+                  Próximos eventos
+                </h2>
+                {proximosEventos.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-500">Este organizador no tiene eventos próximos publicados.</p>
+                ) : (
+                  <div className="grid gap-5 sm:grid-cols-2">
+                    {proximosEventos.map((x) => (
+                      <TarjetaEvento key={x.evento.id} e={x} />
+                    ))}
+                  </div>
+                )}
+              </section>
+            )}
+
+            {conCatalogo && (
             <section aria-labelledby="catalogo-titulo">
               <h2 id="catalogo-titulo" className="mb-3 text-2xl font-black text-ink">
                 {tituloCatalogo}
@@ -148,6 +170,7 @@ export default async function FichaPage({ params }: { params: Params }) {
               {v.plantilla.aviso && <p className="mb-4 rounded-2xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">ℹ️ Los medicamentos con receta médica no se venden por conectari.com: aquí se muestran solo como información. Consulta siempre a tu médico o farmacéutico.</p>}
               <MenuProveedor grupos={grupos} plural={v.plantilla.item.plural} pedible={pedible} />
             </section>
+            )}
 
             <section aria-labelledby="resenas-titulo" className="space-y-4">
               <h2 id="resenas-titulo" className="text-2xl font-black text-ink">

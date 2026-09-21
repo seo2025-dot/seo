@@ -2,7 +2,7 @@
 
 Diseño técnico de las seis secciones nuevas de alta frecuencia: **Movilidad (taxis y mandados), Delivery, Farmacias y salud, Eventos y entradas, Mascotas y Servicios del hogar**.
 
-> **Estado.** **Fases 0 (base de datos), 1 (interfaz) y 2 (carrito, pedidos, solicitudes y ofertas) están hechas.** Están activas **Delivery, Farmacias/Salud, Taxis y mandados, Mascotas y Servicios del hogar** (`activa: true` en `src/data/directorio.ts`); solo **Eventos** sigue como «Muy pronto». Base de datos: `update_006`, `update_007` y `update_008`, probadas contra PostgreSQL real (67 pruebas en `supabase/tests/directorios.test.mjs`). Interfaz: hub, listados con filtros, fichas, buscador universal, alta guiada y panel «Mi negocio» (lógica probada en `supabase/tests/directorio-ui.test.mjs`, 52 pruebas). **Fase 2:** carrito, pago, «Mis pedidos», bandeja del negocio y seguimiento en tiempo real (ver §4.6), y solicitudes con ofertas para Taxis, Hogar y Mascotas (ver §4.7). Pendiente: la sección de **Eventos y entradas**.
+> **Estado.** **Fases 0 (base de datos), 1 (interfaz) y 2 (carrito, pedidos, solicitudes y ofertas) están hechas.** Están activas **las 6 secciones** (`activa: true` en `src/data/directorio.ts`): Delivery, Farmacias/Salud, Taxis y mandados, Eventos y entradas, Mascotas y Servicios del hogar. Base de datos: `update_006` a `update_009`, probadas contra PostgreSQL real (76 pruebas en `supabase/tests/directorios.test.mjs`). Interfaz: hub, listados con filtros, fichas, buscador universal, alta guiada y panel «Mi negocio» (lógica probada en `supabase/tests/directorio-ui.test.mjs`, 68 pruebas). **Fase 2:** carrito, pago, «Mis pedidos», bandeja del negocio y seguimiento en tiempo real (ver §4.6), solicitudes con ofertas para Taxis, Hogar y Mascotas (ver §4.7) y **Eventos y entradas** (ver §4.8).
 
 ---
 
@@ -247,7 +247,30 @@ src/features/directorio/
 - **Movilidad exige identidad verificada** para ofertar (y para recibir avisos de solicitudes); la interfaz lo explica y enlaza a `/verificacion`.
 - **Tiempo real:** `service_requests` y `service_offers` están en la publicación realtime; las listas se recargan al cambiar (las de profesionales con un pequeño retardo para agrupar ráfagas).
 
-**Sugerencia pendiente:** limitar el tamaño de `details` en SQL (hoy solo se acota en el navegador) y una interfaz para que el profesional marque el trabajo como terminado.
+**Topes:** desde la actualización 009 `create_service_request` rechaza detalles de más de 500 caracteres y presupuestos que no caben en `numeric(10,2)`. **Pendiente:** que el profesional marque el trabajo como terminado.
+
+### 4.8 Eventos y entradas
+
+**Modelo.** El organizador es un perfil de la sección Eventos (se crea una vez con el alta guiada) y publica **muchos eventos** (`events`, hasta 30 próximos) cada uno con **tipos de entrada** (`event_ticket_types`: precio, cupo, máximo por persona y cierre de venta). Reservar (`reserve_tickets`) descuenta el cupo en **una sola sentencia condicionada**, así que nunca se vende de más aunque lleguen peticiones a la vez (hay una prueba con 12 simultáneas). Cada reserva lleva un código de 10 caracteres hexadecimales que se muestra como **QR**.
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `/directorio/eventos` | público (ISR 60 s) | cartelera agrupada por día; filtros `cat`, `zona`, `cuando` (hoy, fin de semana, 7 y 30 días), `gratis` y `q`, todos en la URL |
+| `/directorio/evento/[id]` | público | ficha con fecha, lugar, organizador, JSON-LD `Event` y reserva (el cupo se vuelve a consultar en el navegador porque la página está en caché) |
+| `/directorio/entradas` | con sesión | «Mis entradas» con QR, cancelar reserva y eventos guardados |
+| `/directorio/mi-negocio/eventos` | organizador | mis eventos, ocupación, control de acceso y cancelación |
+| `/directorio/mi-negocio/eventos/nuevo` y `/[id]` | organizador | datos, portada, tipos de entrada y lista de asistentes |
+
+**Decisiones.**
+- **Sin pasarela de pago:** la reserva es gratuita y guarda el lugar; el importe se cobra en la puerta (`payment: pay_at_door`). Un evento puede enlazar a otro sitio de venta (`https://` obligatorio, `rel="nofollow noopener"`).
+- **Fechas siempre en hora de Ecuador** (UTC-5 fijo). Sin hora de fin, el evento cuenta como «en curso» 3 h; la venta cierra al empezar.
+- **Cancelar es una función** (`cancel_event`, actualización 009): `status` no es editable por columna. Cancela las reservas vigentes y avisa a cada asistente. Cambiar la fecha también avisa (disparador). Quien reservó sigue viendo el evento cancelado (función definidora `_has_reservation_on`, para no crear una recursión de RLS entre `events` y `event_reservations`).
+- **Un tipo de entrada con reservas no se borra** desde la interfaz (borrarlo eliminaría las reservas en cascada): se sube el cupo o se cierra la venta.
+- **Control de acceso:** `check_in(código)` marca la entrada como usada una sola vez y solo para eventos del organizador. Se escribe el código o, en navegadores con `BarcodeDetector` (Chrome y Edge), se escanea el QR con la cámara.
+- **Privacidad:** el organizador ve el nombre de pila de quien reserva; la lista de asistentes y los códigos solo los ven él y la propia persona (RLS). Los datos estructurados incluyen la dirección del local (es pública, es lo que se anuncia) pero nada de asistentes.
+- **Paridad:** las 9 categorías, los límites de `validarEvento`/`validarEntrada` y la regla de `bloqueoReserva` se comprueban contra PostgreSQL real.
+
+**Pendiente:** entradas de pago en línea, transferencia de entradas, recordatorios previos al evento, reseñas del organizador solo con entrada usada (la base ya lo permite: `verified_purchase`) y notificar al organizador de cada reserva.
 
 ## 5. Pautas para mantener el autoservicio
 

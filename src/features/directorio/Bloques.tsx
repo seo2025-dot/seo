@@ -73,6 +73,7 @@ export function InvitacionSolicitud({ vertical, className = "" }: { vertical: st
 /** Invitación a publicar el propio negocio: es el motor de crecimiento del directorio (todo el contenido lo sube la comunidad). */
 export function InvitacionAlta({ vertical, className = "" }: { vertical?: string; className?: string }) {
   const href = `/directorio/mi-negocio/nuevo${vertical ? `?seccion=${vertical}` : ""}`;
+  if (vertical === "eventos") return <InvitacionOrganizador href={href} className={className} />;
   return (
     <section aria-labelledby="alta-titulo" className={`overflow-hidden rounded-3xl bg-ink p-6 text-white sm:p-8 ${className}`}>
       <p className="text-xs font-bold uppercase tracking-wider text-sun">¿Tienes un negocio o una farmacia?</p>
@@ -92,6 +93,32 @@ export function InvitacionAlta({ vertical, className = "" }: { vertical?: string
       </ol>
       <Link href={href} className="boton-marca mt-5 inline-block rounded-full px-7 py-3 text-sm font-bold text-white">
         Registrar mi negocio
+      </Link>
+    </section>
+  );
+}
+
+/** Invitación a organizadores: crean su perfil una vez y publican todos los eventos que quieran (hasta 30 próximos). */
+function InvitacionOrganizador({ href, className }: { href: string; className: string }) {
+  return (
+    <section aria-labelledby="alta-titulo" className={`overflow-hidden rounded-3xl bg-ink p-6 text-white sm:p-8 ${className}`}>
+      <p className="text-xs font-bold uppercase tracking-wider text-sun">¿Organizas conciertos, talleres o ferias?</p>
+      <h2 id="alta-titulo" className="mt-1 text-2xl font-black leading-tight sm:text-3xl">
+        Publica tu evento y reserva entradas gratis
+      </h2>
+      <p className="mt-2 max-w-xl text-sm text-white/75">
+        Crea tu perfil de organizador una vez y publica todos tus eventos: con fecha, lugar, tipos de entrada y cupo. La gente reserva desde el celular, recibe su código QR y tú controlas el acceso en la puerta. Sin comisiones. Ganas <strong className="text-sun">+30 🪙</strong> con tu primer perfil.
+      </p>
+      <ol className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
+        {["Crea tu perfil de organizador", "Publica tu evento con sus entradas", "Valida los códigos en la puerta"].map((p, i) => (
+          <li key={p} className="flex items-center gap-2 rounded-xl bg-white/10 px-3 py-2">
+            <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-sun text-xs font-black text-ink">{i + 1}</span>
+            {p}
+          </li>
+        ))}
+      </ol>
+      <Link href={href} className="boton-marca mt-5 inline-block rounded-full px-7 py-3 text-sm font-bold text-white">
+        Registrarme como organizador
       </Link>
     </section>
   );

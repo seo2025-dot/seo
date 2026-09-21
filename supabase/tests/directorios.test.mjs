@@ -947,6 +947,219 @@ await test("límite de 30 eventos futuros por organizador", async () => {
   await falla(evento(org2, p.id), /máximo 30 eventos futuros/);
 });
 
+// ── 7b. Eventos operables (update_009): cancelar, reprogramar y topes ────────
+console.log("\nEventos operables (update_009)");
+await test("cancel_event: solo el organizador; cancela las reservas vigentes y avisa a cada asistente", async () => {
+  const orgB = await persona("OrganizadorB");
+  const perfilB = await perfil(orgB, { vertical: "eventos", subtype: "teatro", name: "Teatro Central" });
+  const evB = await evento(orgB, perfilB.id, { titulo: "Función de gala" });
+  const tipoB = (await como(orgB, "insert into public.event_ticket_types (event_id, name, price, quantity) values ($1, 'Platea', 10, 20) returning id", [evB]))[0].id;
+  const uno = await persona("AsistenteUno");
+  const dos = await persona("AsistenteDos");
+  const tres = await persona("AsistenteTres");
+  await como(uno, "select public.reserve_tickets($1, 2)", [tipoB]);
+  await como(dos, "select public.reserve_tickets($1, 1)", [tipoB]);
+  const rTres = (await como(tres, "select public.reserve_tickets($1, 1) r", [tipoB]))[0].r;
+  await como(tres, "select public.cancel_reservation($1)", [rTres.id]); // ya canceló por su cuenta: no se le avisa
+  await falla(como(uno, "select public.cancel_event($1)", [evB]), /No se puede cancelar ese evento/);
+  await falla(como(organizador, "select public.cancel_event($1)", [evB]), /No se puede cancelar ese evento/, "otro organizador no puede");
+  await falla(como(null, "select public.cancel_event($1)", [evB]), /permission denied|No autenticado/);
+  await falla(como(orgB, "select public.cancel_event($1)", [randomUUID()]), /No se puede cancelar ese evento/);
+  const n = (await como(orgB, "select public.cancel_event($1) n", [evB]))[0].n;
+  assert.equal(n, 2, "se avisa a quienes tenían reserva vigente");
+  assert.equal((await q("select status from public.events where id = $1", [evB]))[0].status, "cancelled");
+  const estados = (await q("select status, count(*)::int n from public.event_reservations where event_id = $1 group by status", [evB])).map((r) => [r.status, r.n]);
+  assert.deepEqual(estados, [["cancelled", 3]]);
+  const av = await avisos(uno, "event", evB);
+  assert.equal(av.length, 1);
+  assert.match(av[0].title, /Se canceló «Función de gala»/);
+  assert.match(av[0].body, /2 entradas/);
+  assert.equal(av[0].href, "/directorio/entradas");
+  assert.match((await avisos(dos, "event", evB))[0].body, /1 entrada quedó/);
+  assert.equal((await avisos(tres, "event", evB)).length, 0);
+  assert.equal((await como(uno, "select id from public.events where id = $1", [evB])).length, 1, "quien tenía reserva sigue viendo el evento cancelado");
+  assert.equal((await como(dos, "select title, status from public.events where id = $1", [evB]))[0].status, "cancelled");
+  const ajeno = await persona("AjenoAlEvento");
+  assert.equal((await como(ajeno, "select id from public.events where id = $1", [evB])).length, 0, "quien no reservó no ve un evento cancelado");
+  assert.equal((await como(null, "select id from public.events where id = $1", [evB])).length, 0, "ni se ve sin sesión (y la política no falla para anónimos)");
+  assert.equal((await como(orgB, "select id from public.events where id = $1", [evB])).length, 1, "el organizador siempre lo ve");
+  await q("update public.events set status = 'review' where id = $1", [evB]);
+  assert.equal((await como(uno, "select id from public.events where id = $1", [evB])).length, 0, "un evento oculto por moderación no se ve aunque hubiera reserva");
+  await q("update public.events set status = 'cancelled' where id = $1", [evB]);
+  await falla(como(orgB, "select public.cancel_event($1)", [evB]), /No se puede cancelar ese evento/, "no se cancela dos veces");
+  const cuatro = await persona("AsistenteCuatro");
+  await falla(como(cuatro, "select public.reserve_tickets($1, 1)", [tipoB]), /agotadas, venta cerrada/, "ya no se venden entradas");
+});
+await test("cambiar la fecha de un evento avisa a quienes tienen reserva vigente (y solo a ellos)", async () => {
+  const orgC = await persona("OrganizadorC");
+  const perfilC = await perfil(orgC, { vertical: "eventos", subtype: "organizador", name: "Cultura Viva" });
+  const evC = await evento(orgC, perfilC.id, { titulo: "Taller de cerámica" });
+  const tipoC = (await como(orgC, "insert into public.event_ticket_types (event_id, name, price, quantity) values ($1, 'Cupo', 0, 10) returning id", [evC]))[0].id;
+  const con = await persona("ConReserva");
+  const sin = await persona("SinReserva");
+  const canc = await persona("Canceladora");
+  await como(con, "select public.reserve_tickets($1, 1)", [tipoC]);
+  const rc = (await como(canc, "select public.reserve_tickets($1, 1) r", [tipoC]))[0].r;
+  await como(canc, "select public.cancel_reservation($1)", [rc.id]);
+  await como(orgC, "update public.events set title = 'Taller de cerámica II' where id = $1", [evC]);
+  assert.equal((await avisos(con, "event", evC)).length, 0, "cambiar otra cosa no avisa");
+  await como(orgC, "update public.events set starts_at = now() + interval '20 days' where id = $1", [evC]);
+  const av = await avisos(con, "event", evC);
+  assert.equal(av.length, 1);
+  assert.match(av[0].title, /Cambió la fecha de «Taller de cerámica II»/);
+  assert.equal(av[0].href, "/directorio/entradas");
+  assert.equal((await avisos(sin, "event", evC)).length, 0);
+  assert.equal((await avisos(canc, "event", evC)).length, 0);
+});
+await test("create_service_request: tope de tamaño en los detalles y en el presupuesto", async () => {
+  const p1 = await persona(`Topes${Math.random().toString(36).slice(2, 8)}`);
+  await falla(solicitar(p1, { vertical: "hogar", subtype: "plomero", dest: "", details: { texto: "x".repeat(600) } }), /detalles de la solicitud son demasiado largos/);
+  await falla(solicitar(p1, { vertical: "hogar", subtype: "plomero", dest: "", budget: 100000000 }), /presupuesto es demasiado alto/);
+  await solicitar(p1, { vertical: "hogar", subtype: "plomero", dest: "", budget: 99999999.99, details: { urgente: true } });
+  await solicitar(p1, { vertical: "hogar", subtype: "plomero", dest: "", title: "Otra reparación", details: { texto: "x".repeat(400) } });
+});
+
+// ── 7c. Paridad eventos y entradas ↔ servidor ────────────────────────────────
+console.log("\nEventos: paridad con la base de datos");
+const { CATEGORIAS_EVENTO, bloqueoReserva, borradorEventoVacio, codigoValido, filaActualizacionEvento, filaEntrada, filaEvento, mapearEvento, mapearTipoEntrada, validarEntrada, validarEvento } = await import("@/lib/directorio/eventos");
+const insertarFila = (uid, tabla, fila) => {
+  const cols = Object.keys(fila);
+  return como(uid, `insert into public.${tabla} (${cols.join(", ")}) values (${cols.map((_, i) => `$${i + 1}`).join(", ")}) returning id`, Object.values(fila)).then((r) => r[0].id);
+};
+const enEcuadorEv = (ms) => new Date(ms - 5 * 3_600_000).toISOString().slice(0, 16); // valor de un datetime-local
+const sufijo = () => Math.random().toString(36).slice(2, 9);
+const orgP = await persona(`OrgParidad${sufijo()}`);
+const perfilP = await perfil(orgP, { vertical: "eventos", subtype: "organizador", name: "Paridad Eventos" });
+await test("PARIDAD: las 9 categorías de la interfaz son exactamente las que acepta la base", async () => {
+  for (const c of CATEGORIAS_EVENTO) {
+    const b = { ...borradorEventoVacio(perfilP.id), titulo: `Evento de ${c.id}`, categoria: c.id, lugar: "Sala", zona: "Centro", inicia: enEcuadorEv(Date.now() + 5 * 86_400_000) };
+    assert.deepEqual(validarEvento(b, { nuevo: true }), {});
+    await insertarFila(orgP, "events", filaEvento(b, null));
+  }
+  const b = { ...borradorEventoVacio(perfilP.id), titulo: "Categoría falsa", categoria: "inventada", lugar: "Sala", zona: "Centro", inicia: enEcuadorEv(Date.now() + 5 * 86_400_000) };
+  await falla(insertarFila(orgP, "events", filaEvento(b, null)), /category|check/);
+  assert.ok(validarEvento(b, { nuevo: true }).categoria);
+  await q("delete from public.events where provider_id = $1", [perfilP.id]); // no acercarse al tope de 30 eventos futuros
+});
+await test("PARIDAD: si validarEvento() da el visto bueno el servidor acepta; si no, y la regla es del servidor, también rechaza", async () => {
+  const ok = { ...borradorEventoVacio(perfilP.id), titulo: "Noche de jazz", categoria: "concierto", lugar: "Teatro Sucre", zona: "Centro", direccion: "Sucre y Borrero", inicia: enEcuadorEv(Date.now() + 3 * 86_400_000), termina: enEcuadorEv(Date.now() + 3 * 86_400_000 + 3 * 3_600_000), enlaceEntradas: "https://entradas.example.com/e" };
+  const escenarios = [
+    // [nombre, cambios, ¿la regla es también del servidor?]
+    ["todo bien", {}, false],
+    ["descripción de 2000 letras", { descripcion: "a".repeat(2000) }, false],
+    ["sin fin", { termina: "" }, false],
+    ["título corto", { titulo: "Ay" }, true],
+    ["título de 121 letras", { titulo: "a".repeat(121) }, true],
+    ["descripción de 2001 letras", { descripcion: "a".repeat(2001) }, true],
+    ["lugar de 101 letras", { lugar: "a".repeat(101) }, true],
+    ["dirección de 161 letras", { direccion: "a".repeat(161) }, true],
+    ["zona de 81 letras", { zona: "a".repeat(81) }, true],
+    ["fecha pasada", { inicia: enEcuadorEv(Date.now() - 86_400_000), termina: "" }, true],
+    ["fin igual al inicio", { termina: null }, true],
+    ["fin anterior al inicio", { termina: enEcuadorEv(Date.now() + 86_400_000) }, true],
+    ["enlace http", { enlaceEntradas: "http://x.com/e" }, true],
+    ["enlace con espacios", { enlaceEntradas: "https://x com/e" }, true],
+    ["enlace sin protocolo", { enlaceEntradas: "x.com/e" }, true],
+    ["sin lugar (la base lo admite)", { lugar: "" }, false],
+    ["sin zona (la base lo admite)", { zona: "" }, false],
+  ];
+  for (const [nombre, cambios, delServidor] of escenarios) {
+    const c = { ...cambios };
+    if (c.termina === null) c.termina = ok.inicia;
+    const b = { ...ok, ...c };
+    const clienteRechaza = Object.keys(validarEvento(b, { nuevo: true })).length > 0;
+    let servidorRechaza = false;
+    try {
+      await insertarFila(orgP, "events", filaEvento(b, null));
+    } catch (e) {
+      servidorRechaza = true;
+      if (!clienteRechaza) throw new Error(`«${nombre}»: el cliente lo daba por bueno y el servidor lo rechazó (${e.message})`);
+    }
+    if (delServidor) assert.ok(servidorRechaza && clienteRechaza, `«${nombre}»: ambos deben rechazarlo (cliente ${clienteRechaza}, servidor ${servidorRechaza})`);
+    await q("delete from public.events where provider_id = $1", [perfilP.id]);
+  }
+});
+await test("PARIDAD: la edición envía solo columnas actualizables y el evento sigue siendo del mismo organizador", async () => {
+  const b = { ...borradorEventoVacio(perfilP.id), titulo: "Feria de diseño", categoria: "feria", lugar: "Plaza", zona: "Centro", inicia: enEcuadorEv(Date.now() + 4 * 86_400_000) };
+  const id = await insertarFila(orgP, "events", filaEvento(b, null));
+  const cambio = { ...b, titulo: "Feria de diseño y arte", gratis: true, termina: enEcuadorEv(Date.now() + 4 * 86_400_000 + 5 * 3_600_000) };
+  assert.deepEqual(validarEvento(cambio, { nuevo: false }), {});
+  const fila = filaActualizacionEvento(cambio);
+  const cols = Object.keys(fila);
+  await como(orgP, `update public.events set ${cols.map((c, i) => `${c} = $${i + 2}`).join(", ")} where id = $1`, [id, ...Object.values(fila)]);
+  const [ev] = await q("select title, is_free, provider_id, cover_url from public.events where id = $1", [id]);
+  assert.deepEqual([ev.title, ev.is_free, ev.provider_id, ev.cover_url], ["Feria de diseño y arte", true, perfilP.id, null]);
+  await q("delete from public.events where provider_id = $1", [perfilP.id]);
+});
+await test("PARIDAD: validarEntrada() y event_ticket_types coinciden en precio, cupo y máximo por persona", async () => {
+  const evId = await evento(orgP, perfilP.id, { titulo: "Evento con entradas" });
+  const ok = { nombre: "General", precio: "12.50", cupo: "100", maxPorPedido: "6", ventaHasta: "" };
+  // Estos tres los frena solo el cliente: filaEntrada() los normaliza a 0 antes de llegar a la base.
+  const soloCliente = ["precio negativo", "precio con 3 decimales", "precio no numérico"];
+  const escenarios = [
+    ["normal", {}], ["gratis", { precio: "0" }], ["precio con coma", { precio: "7,5" }], ["precio máximo", { precio: "999999.99" }], ["cupo máximo", { cupo: "100000" }], ["máximo por persona 20", { maxPorPedido: "20" }],
+    ["nombre corto", { nombre: "A" }], ["nombre de 61", { nombre: "a".repeat(61) }], ["cupo cero", { cupo: "0" }], ["cupo excesivo", { cupo: "100001" }],
+    ["por persona 0", { maxPorPedido: "0" }], ["por persona 21", { maxPorPedido: "21" }],
+    ["precio negativo", { precio: "-1" }], ["precio con 3 decimales", { precio: "1.234" }], ["precio no numérico", { precio: "gratis" }],
+  ];
+  for (const [nombre, cambios] of escenarios) {
+    const b = { ...ok, ...cambios };
+    const clienteRechaza = Object.keys(validarEntrada(b)).length > 0;
+    let servidorRechaza = false;
+    let id;
+    try {
+      id = await insertarFila(orgP, "event_ticket_types", filaEntrada(b, evId));
+    } catch (e) {
+      servidorRechaza = true;
+      if (!clienteRechaza) throw new Error(`«${nombre}»: el cliente lo daba por bueno y el servidor lo rechazó (${e.message})`);
+    }
+    if (soloCliente.includes(nombre)) assert.ok(clienteRechaza, `«${nombre}»: el cliente debe rechazarlo`);
+    else assert.equal(servidorRechaza, clienteRechaza, `«${nombre}»: cliente ${clienteRechaza ? "rechaza" : "acepta"}, servidor ${servidorRechaza ? "rechaza" : "acepta"}`);
+    if (id) await q("delete from public.event_ticket_types where id = $1", [id]);
+  }
+});
+await test("PARIDAD: bloqueoReserva() y reserve_tickets() coinciden (cupo, máximo, cierre de venta, evento empezado o cancelado)", async () => {
+  const escenarios = [
+    // [nombre, {cupo, vendidas, max, ventaHasta, inicia, estado}, cantidad]
+    ["reserva normal", { cupo: 10, vendidas: 0, max: 4 }, 2],
+    ["justo lo que queda", { cupo: 10, vendidas: 8, max: 6 }, 2],
+    ["más de lo permitido por persona", { cupo: 10, vendidas: 0, max: 4 }, 5],
+    ["más de lo que queda", { cupo: 10, vendidas: 9, max: 6 }, 2],
+    ["agotada", { cupo: 10, vendidas: 10, max: 6 }, 1],
+    ["venta cerrada", { cupo: 10, vendidas: 0, max: 6, ventaHasta: "now() - interval '1 minute'" }, 1],
+    ["venta abierta hasta mañana", { cupo: 10, vendidas: 0, max: 6, ventaHasta: "now() + interval '1 day'" }, 1],
+    ["el evento ya empezó", { cupo: 10, vendidas: 0, max: 6, inicia: "now() - interval '1 hour'" }, 1],
+    ["evento cancelado", { cupo: 10, vendidas: 0, max: 6, estado: "cancelled" }, 1],
+    ["cantidad 0", { cupo: 10, vendidas: 0, max: 6 }, 0],
+    ["cantidad 21", { cupo: 30, vendidas: 0, max: 20 }, 21],
+    ["cantidad 20 con cupo", { cupo: 30, vendidas: 0, max: 20 }, 20],
+  ];
+  for (const [nombre, s, cantidad] of escenarios) {
+    const evId = await evento(orgP, perfilP.id, { titulo: `Paridad ${nombre}`.slice(0, 60) });
+    const tipoId = (await q(`insert into public.event_ticket_types (event_id, name, price, quantity, max_per_order, sales_end) values ($1, 'General', 9.99, $2, $3, ${s.ventaHasta ?? "null"}) returning id`, [evId, s.cupo, s.max]))[0].id;
+    if (s.vendidas) await q("update public.event_ticket_types set sold = $2 where id = $1", [tipoId, s.vendidas]);
+    if (s.inicia) await q(`update public.events set starts_at = ${s.inicia} where id = $1`, [evId]);
+    if (s.estado) await q("update public.events set status = $2 where id = $1", [evId, s.estado]);
+    const [fe] = await q("select * from public.events where id = $1", [evId]);
+    const [ft] = await q("select * from public.event_ticket_types where id = $1", [tipoId]);
+    const filaEv = { ...fe, starts_at: new Date(fe.starts_at).toISOString(), ends_at: null, created_at: new Date(fe.created_at).toISOString() };
+    const clienteRechaza = bloqueoReserva(mapearTipoEntrada(ft), mapearEvento(filaEv), cantidad) !== null;
+    const asistente = await persona(`Paridad${sufijo()}`);
+    let servidorRechaza = false;
+    try {
+      await como(asistente, "select public.reserve_tickets($1, $2)", [tipoId, cantidad]);
+    } catch {
+      servidorRechaza = true;
+    }
+    assert.equal(servidorRechaza, clienteRechaza, `«${nombre}»: cliente ${clienteRechaza ? "rechaza" : "acepta"}, servidor ${servidorRechaza ? "rechaza" : "acepta"}`);
+    if (!servidorRechaza) {
+      const [r] = await q("select code, total from public.event_reservations where ticket_type_id = $1", [tipoId]);
+      assert.ok(codigoValido(r.code), `el código ${r.code} no cumple el formato de la interfaz`);
+      assert.equal(Number(r.total), Math.round(9.99 * 100 * cantidad) / 100, "total de la reserva");
+    }
+  }
+});
+
 // ── 8. Reseñas ──────────────────────────────────────────────────────────────
 console.log("\nReseñas");
 const resenar = (uid, prov, rating, comentario = "") => como(uid, "select public.review_provider($1, $2, $3)", [prov, rating, comentario]);
@@ -1269,6 +1482,55 @@ await test("MIGRACIÓN: update_008 sobre una base con 007 (dos veces) conserva p
     await m.query("commit");
     assert.equal((await m.query("select customer_phone from public.orders where id = $1", [nuevo])).rows[0].customer_phone, "099 111 2222");
     assert.match((await m.query("select href from public.notifications where user_id = $1 and data ->> 'order' = $2", [dueno8, nuevo])).rows[0].href, /^\/directorio\/pedidos\//);
+  } finally {
+    await m.end();
+  }
+});
+
+await test("MIGRACIÓN: update_009 sobre una base con 008 (dos veces) conserva eventos y reservas, y añade cancel_event y los topes", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-009-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-009-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 009 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_009_eventos.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_009 difieren");
+  await server.createDatabase("migracion9");
+  const m = new pg.Client({ ...conn, database: "migracion9" });
+  await m.connect();
+  m.on("notice", () => {});
+  const como9 = async (uid, sql, params = []) => {
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: uid, role: "authenticated" })]);
+    try {
+      const r = await m.query(sql, params);
+      await m.query("commit");
+      return r.rows;
+    } catch (e) {
+      await m.query("rollback");
+      throw e;
+    }
+  };
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 008
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'org9@test.dev', '{\"full_name\":\"Organizador Nueve\"}'), (gen_random_uuid(), 'asi9@test.dev', '{\"full_name\":\"Asistente Nueve\"}')");
+    const [org9, asi9] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    const prov = (await m.query("insert into public.providers (owner_id, vertical, subtype, name) values ($1, 'eventos', 'organizador', 'Org Nueve') returning id", [org9])).rows[0].id;
+    const ev = (await m.query("insert into public.events (provider_id, title, category, starts_at) values ($1, 'Feria del libro', 'feria', now() + interval '5 days') returning id", [prov])).rows[0].id;
+    const tipo = (await m.query("insert into public.event_ticket_types (event_id, name, price, quantity) values ($1, 'General', 3, 50) returning id", [ev])).rows[0].id;
+    await como9(asi9, "select public.reserve_tickets($1, 2)", [tipo]);
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname = 'cancel_event'")).rows[0].n, 0, "antes de la 009 no existe cancel_event");
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname = 'cancel_event'")).rows[0].n, 1);
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname = 'create_service_request'")).rows[0].n, 1, "una sola create_service_request");
+    assert.equal((await m.query("select count(*)::int n from pg_trigger where tgname = 'events_reschedule_notice' and not tgisinternal")).rows[0].n, 1);
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname = '_has_reservation_on'")).rows[0].n, 1);
+    assert.equal((await m.query("select sold from public.event_ticket_types where id = $1", [tipo])).rows[0].sold, 2, "las ventas previas se conservan");
+    assert.equal((await como9(org9, "select public.cancel_event($1) n", [ev]))[0].n, 1);
+    assert.equal((await m.query("select status from public.event_reservations where event_id = $1", [ev])).rows[0].status, "cancelled");
+    await assert.rejects(como9(asi9, "select public.create_service_request('hogar', 'plomero', 'Arreglo urgente', '', 'Centro', '', 'today', null, null, $1::jsonb)", [JSON.stringify({ t: "x".repeat(600) })]), /demasiado largos/);
   } finally {
     await m.end();
   }

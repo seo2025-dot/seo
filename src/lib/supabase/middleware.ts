@@ -18,6 +18,7 @@ const PROTEGIDAS = [
   "/directorio/mi-negocio",
   "/directorio/pedidos",
   "/directorio/solicitudes",
+  "/directorio/entradas",
   "/admin",
   "/onboarding",
 ];

@@ -206,6 +206,11 @@ export default function AsistenteAlta() {
           <Link href={url} className="boton-marca rounded-full px-7 py-3 text-sm font-bold text-white">
             Ver mi ficha
           </Link>
+          {b.vertical === "eventos" && (
+            <Link href="/directorio/mi-negocio/eventos/nuevo" className="rounded-full bg-ink px-7 py-3 text-sm font-bold text-white hover:bg-brand-700">
+              Publicar mi primer evento
+            </Link>
+          )}
           <Link href={`/directorio/mi-negocio/${publicado.id}`} className="rounded-full border border-slate-300 px-7 py-3 text-sm font-bold text-ink hover:border-brand-400">
             Completar mi perfil
           </Link>
@@ -263,7 +268,14 @@ export default function AsistenteAlta() {
             <SubidaImagen etiqueta="Foto de portada" ayuda="Horizontal: tu local, tus platos o tu mostrador." valor={b.portada} onChange={(portada) => cambiar({ portada })} maxLado={1200} />
           </div>
         )}
-        {paso === 5 && v && (
+        {paso === 5 && v && v.capacidades.catalogo.length === 0 && (
+          <div className="space-y-4">
+            <p className="rounded-2xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900">
+              🎟️ Los eventos no llevan catálogo: los publicas uno a uno desde <strong>Mis eventos</strong>, con su fecha, lugar y tipos de entrada. Pulsa «Publicar» para crear tu perfil de organizador y sigue con tu primer evento.
+            </p>
+          </div>
+        )}
+        {paso === 5 && v && v.capacidades.catalogo.length > 0 && (
           <div className="space-y-6">
             <p className="text-sm text-slate-600">
               Añade tus primeros {v.plantilla.item.plural} con su precio. Es lo que la gente busca (y lo que encuentra el buscador). No te preocupes por completarlo todo: podrás añadir más desde «Mi negocio».

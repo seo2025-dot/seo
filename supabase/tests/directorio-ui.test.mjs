@@ -17,6 +17,13 @@ import {
   VERTICALES_SOLICITUD, argumentosOferta, argumentosSolicitud, bloqueoOferta, camposDetalle, destacadas, estadoVisible, instanteDesdeLocal, limpiarDetalles, mapearOferta, mapearSolicitud,
   mensajeErrorSolicitud, ordenarOfertas, perfilesQueEncajan, resumenDetalles, textoMomento, textoTiempoOferta, tiempoRestante, validarOferta, validarSolicitud,
 } from "@/lib/directorio/solicitudes";
+import {
+  CATEGORIAS_EVENTO, CODIGO_ENTRADA, FILTROS_EVENTO_INICIALES, agruparPorDia, borradorDesdeEntrada, borradorEventoVacio, bloqueoReserva, categoriaEvento, claveDia, codigoLegible, codigoValido, contenidoQR, entradaVacia,
+  estadoVenta, etiquetaDia, faseEvento, filaActualizacionEvento, filaEntrada, filaEvento, filtrosEventoActivos, filtrosEventoDesdeParams, hrefCartelera, inicioDia, jsonLdEvento, mapearEvento,
+  mapearReserva, mapearTipoEntrada, maxReservable, mensajeErrorEventos, normalizarCodigo, ocupacion, patronBusqueda, puedeCancelarReserva, rangoCuando, resumenAsistentes, textoFechaCorta,
+  textoFechaLarga, textoHora, textoPrecioEvento, textoRango, totalReserva, validarEntrada, validarEvento, validarVenta, vigentes,
+} from "@/lib/directorio/eventos";
+import qrcode from "qrcode-generator";
 import { completitudNegocio } from "@/lib/directorio/completitud";
 import { enlaceTel, enlaceWhatsapp, formatearTelefono, mensajePedido, normalizarTelefonoEC, telefonoValido } from "@/lib/directorio/contacto";
 import { FILTROS_INICIALES, TAM_PAGINA, argumentosBusqueda, consultaDesdeFiltros, consultaUniversal, filtrosActivos, filtrosDesdeParams, hrefLista } from "@/lib/directorio/filtros";
@@ -44,9 +51,9 @@ const test = async (nombre, fn) => {
 };
 
 console.log("\nCatálogo y plantillas");
-await test("secciones activas: todas menos Eventos (que llega en otra fase)", () => {
-  assert.deepEqual(VERTICALES_ACTIVAS.map((v) => v.id), ["movilidad", "delivery", "salud", "mascotas", "hogar"]);
-  assert.deepEqual(VERTICALES.filter((v) => !v.activa).map((v) => v.id), ["eventos"]);
+await test("las 6 secciones están activas", () => {
+  assert.deepEqual(VERTICALES_ACTIVAS.map((v) => v.id), ["movilidad", "delivery", "salud", "eventos", "mascotas", "hogar"]);
+  assert.deepEqual(VERTICALES.filter((v) => !v.activa).map((v) => v.id), []);
 });
 await test("cada plantilla de alta es coherente: canales válidos, horario existente, tipo de elemento permitido y ejemplos con precio", () => {
   const canales = new Set(CANALES.map((c) => c.id));
@@ -355,7 +362,7 @@ await test("integración: los alias de next.config.ts coinciden con el catálogo
   const enConfig = [...config.matchAll(/\["(\w+)", "(\w+)"\]/g)].map((m) => [m[1], m[2]]);
   assert.deepEqual(enConfig, VERTICALES.map((v) => [v.alias, v.id]), "alias de next.config.ts distintos a VERTICALES");
   const middleware = fs.readFileSync(new URL("../../src/lib/supabase/middleware.ts", import.meta.url), "utf8");
-  for (const ruta of ["mi-negocio", "pedidos", "solicitudes"]) assert.match(middleware, new RegExp(`"/directorio/${ruta}"`), `${ruta} debe estar protegida`);
+  for (const ruta of ["mi-negocio", "pedidos", "solicitudes", "entradas"]) assert.match(middleware, new RegExp(`"/directorio/${ruta}"`), `${ruta} debe estar protegida`);
   const marca = fs.readFileSync(new URL("../../src/lib/marca.ts", import.meta.url), "utf8");
   assert.match(marca, /id: "delivery", href: "\/directorio\/delivery"/);
   assert.match(marca, /id: "farmacias", href: "\/directorio\/salud"/);
@@ -722,6 +729,268 @@ await test("mensajeErrorSolicitud traduce los errores del servidor", () => {
   assert.match(mensajeErrorSolicitud("No se puede cerrar esa solicitud"), /Actualiza/);
   assert.match(mensajeErrorSolicitud("permission denied for table x"), /sesión caducó/);
   assert.equal(mensajeErrorSolicitud("algo raro"), "algo raro");
+});
+
+console.log("\nEventos y entradas");
+const HORA_MS = 3_600_000;
+const DIA_MS = 86_400_000;
+// Miércoles 3 de junio de 2026, 12:00 en Ecuador (17:00 UTC)
+const AHORA_EV = Date.UTC(2026, 5, 3, 17, 0);
+const ecuador = (y, m, d, h = 0, min = 0) => Date.UTC(y, m - 1, d, h + 5, min); // instante de una hora local de Ecuador
+const evt = (extra = {}) => ({ inicia: AHORA_EV + 2 * DIA_MS, termina: undefined, estado: "published", gratis: false, enlaceEntradas: undefined, ...extra });
+const tipoE = (extra = {}) => ({ id: "t1", eventoId: "e1", nombre: "General", precio: 12.5, cupo: 100, vendidas: 0, maxPorPedido: 6, ventaHasta: undefined, ...extra });
+
+await test("categorías de eventos: 9, únicas, con emoji; una desconocida cae en «otro»", () => {
+  assert.equal(CATEGORIAS_EVENTO.length, 9);
+  assert.equal(new Set(CATEGORIAS_EVENTO.map((c) => c.id)).size, 9);
+  for (const c of CATEGORIAS_EVENTO) assert.ok(c.etiqueta && c.emoji);
+  assert.equal(categoriaEvento("inventada").id, "otro");
+  const fila = { id: "e1", provider_id: "p1", title: "Concierto", description: "", category: "rara", venue_name: "", address: "", zone: "", starts_at: new Date(AHORA_EV).toISOString(), ends_at: null, cover_url: null, images: null, is_free: false, external_ticket_url: null, status: "published", created_at: new Date(AHORA_EV).toISOString() };
+  assert.equal(mapearEvento(fila).categoria, "otro");
+  assert.deepEqual(mapearEvento(fila).imagenes, []);
+  assert.equal(mapearEvento({ ...fila, status: "rara" }), null);
+  assert.equal(mapearEvento({ ...fila, ends_at: new Date(AHORA_EV + HORA_MS).toISOString() }).termina, AHORA_EV + HORA_MS);
+});
+await test("faseEvento: próximo, en curso (3 h supuestas o hasta la hora de fin), finalizado y cancelado", () => {
+  const e = evt({ inicia: AHORA_EV + HORA_MS });
+  assert.equal(faseEvento(e, AHORA_EV), "proximo");
+  assert.equal(faseEvento(e, AHORA_EV + HORA_MS), "en_curso");
+  assert.equal(faseEvento(e, AHORA_EV + 4 * HORA_MS - 1), "en_curso");
+  assert.equal(faseEvento(e, AHORA_EV + 4 * HORA_MS), "finalizado");
+  const conFin = evt({ inicia: AHORA_EV, termina: AHORA_EV + 30 * 60_000 });
+  assert.equal(faseEvento(conFin, AHORA_EV + 29 * 60_000), "en_curso");
+  assert.equal(faseEvento(conFin, AHORA_EV + 30 * 60_000), "finalizado");
+  assert.equal(faseEvento({ ...e, estado: "cancelled" }, AHORA_EV), "cancelado");
+});
+await test("estadoVenta / maxReservable / bloqueoReserva / totalReserva", () => {
+  const e = evt();
+  assert.deepEqual(estadoVenta(tipoE(), e, AHORA_EV), { estado: "disponible", texto: "Disponible" });
+  assert.equal(estadoVenta(tipoE({ vendidas: 95 }), e, AHORA_EV).texto, "Quedan 5", "pocas: ≤ 5 o ≤ 10 % del cupo");
+  assert.equal(estadoVenta(tipoE({ vendidas: 99 }), e, AHORA_EV).texto, "Queda 1");
+  assert.equal(estadoVenta(tipoE({ cupo: 200, vendidas: 181 }), e, AHORA_EV).estado, "pocas", "19 = menos del 10 % de 200");
+  assert.equal(estadoVenta(tipoE({ cupo: 200, vendidas: 179 }), e, AHORA_EV).estado, "disponible");
+  assert.equal(estadoVenta(tipoE({ vendidas: 100 }), e, AHORA_EV).estado, "agotada");
+  assert.equal(estadoVenta(tipoE({ ventaHasta: AHORA_EV }), e, AHORA_EV).estado, "cerrada", "la venta cerró");
+  assert.equal(estadoVenta(tipoE(), e, e.inicia).estado, "cerrada", "al empezar el evento ya no se vende");
+  assert.equal(estadoVenta(tipoE(), { ...e, estado: "cancelled" }, AHORA_EV).estado, "cerrada");
+  assert.equal(maxReservable(tipoE({ maxPorPedido: 4 }), e, AHORA_EV), 4);
+  assert.equal(maxReservable(tipoE({ vendidas: 98, maxPorPedido: 4 }), e, AHORA_EV), 2, "no más de lo que queda");
+  assert.equal(maxReservable(tipoE({ vendidas: 100 }), e, AHORA_EV), 0);
+  assert.equal(bloqueoReserva(tipoE(), e, 2, AHORA_EV), null);
+  for (const n of [0, -1, 21, 1.5, Number.NaN]) assert.match(bloqueoReserva(tipoE(), e, n, AHORA_EV), /entre 1 y 20/, `cantidad ${n}`);
+  assert.match(bloqueoReserva(tipoE({ maxPorPedido: 3 }), e, 4, AHORA_EV), /hasta 3 por persona/);
+  assert.match(bloqueoReserva(tipoE({ vendidas: 99 }), e, 2, AHORA_EV), /Solo quedan 1/);
+  assert.match(bloqueoReserva(tipoE({ vendidas: 100 }), e, 1, AHORA_EV), /agotada/);
+  assert.match(bloqueoReserva(tipoE(), e, 1, e.inicia + 1), /cerrada/);
+  assert.equal(totalReserva(tipoE({ precio: 19.99 }), 3), 59.97);
+  assert.equal(totalReserva(tipoE({ precio: 0.1 }), 3), 0.3, "sin errores de coma flotante");
+  assert.equal(totalReserva(tipoE({ precio: 0 }), 5), 0);
+});
+await test("textoPrecioEvento: gratis, desde, precio único, agotado y sin tipos", () => {
+  const e = evt();
+  assert.equal(textoPrecioEvento(e, [tipoE({ precio: 0 })], AHORA_EV), "Gratis");
+  assert.equal(textoPrecioEvento(e, [tipoE({ precio: 5 }), tipoE({ id: "t2", precio: 20 })], AHORA_EV), "Desde $5.00");
+  assert.equal(textoPrecioEvento(e, [tipoE({ precio: 12.5 })], AHORA_EV), "$12.50");
+  assert.equal(textoPrecioEvento(e, [tipoE({ precio: 5, vendidas: 100 }), tipoE({ id: "t2", precio: 20 })], AHORA_EV), "$20.00", "el precio de lo agotado no se anuncia");
+  assert.equal(textoPrecioEvento(e, [tipoE({ vendidas: 100 })], AHORA_EV), "Agotado");
+  assert.equal(textoPrecioEvento(e, [], AHORA_EV), "Consultar");
+  assert.equal(textoPrecioEvento(evt({ gratis: true }), [], AHORA_EV), "Entrada libre");
+  assert.equal(textoPrecioEvento(evt({ enlaceEntradas: "https://x.com/e" }), [], AHORA_EV), "Entradas en línea");
+  assert.equal(textoPrecioEvento(e, [tipoE({ ventaHasta: AHORA_EV - 1 })], AHORA_EV), "Consultar", "venta cerrada = sin precio que anunciar");
+});
+await test("fechas en hora de Ecuador: texto, «Hoy/Mañana» y rangos", () => {
+  const sabado = ecuador(2026, 6, 6, 20, 0);
+  assert.match(textoFechaCorta(sabado), /^s[aá]b 6 jun · 20:00$/);
+  assert.match(textoFechaLarga(sabado), /^s[aá]bado 6 de junio de 2026, 20:00$/);
+  assert.equal(textoHora(ecuador(2026, 6, 6, 0, 5)), "00:05", "medianoche local, no UTC");
+  assert.equal(claveDia(ecuador(2026, 6, 6, 23, 59)), "2026-06-06");
+  assert.equal(claveDia(ecuador(2026, 6, 7, 0, 0)), "2026-06-07");
+  assert.equal(etiquetaDia(ecuador(2026, 6, 3, 23, 0), AHORA_EV), "Hoy");
+  assert.equal(etiquetaDia(ecuador(2026, 6, 4, 0, 30), AHORA_EV), "Mañana");
+  assert.match(etiquetaDia(ecuador(2026, 6, 6, 10, 0), AHORA_EV), /^s[aá]b 6 jun$/);
+  assert.match(textoRango({ inicia: sabado, termina: ecuador(2026, 6, 6, 23, 0) }), /20:00 – 23:00$/);
+  assert.match(textoRango({ inicia: sabado, termina: ecuador(2026, 6, 7, 2, 0) }), /→ dom 7 jun · 02:00$/);
+  assert.match(textoRango({ inicia: sabado }), /^s[aá]b 6 jun · 20:00$/);
+  assert.equal(inicioDia(AHORA_EV), ecuador(2026, 6, 3, 0, 0));
+});
+await test("rangoCuando: hoy, fin de semana (según el día de la semana), 7 y 30 días", () => {
+  assert.deepEqual(rangoCuando("hoy", AHORA_EV), { desde: ecuador(2026, 6, 3), hasta: ecuador(2026, 6, 4) });
+  assert.deepEqual(rangoCuando("finde", AHORA_EV), { desde: ecuador(2026, 6, 6), hasta: ecuador(2026, 6, 8) }, "desde un miércoles: sábado y domingo");
+  assert.deepEqual(rangoCuando("finde", ecuador(2026, 6, 6, 15)), { desde: ecuador(2026, 6, 6), hasta: ecuador(2026, 6, 8) }, "en sábado: incluye hoy");
+  assert.deepEqual(rangoCuando("finde", ecuador(2026, 6, 7, 15)), { desde: ecuador(2026, 6, 7), hasta: ecuador(2026, 6, 8) }, "en domingo: solo hoy");
+  assert.deepEqual(rangoCuando("finde", ecuador(2026, 6, 5, 22)), { desde: ecuador(2026, 6, 6), hasta: ecuador(2026, 6, 8) }, "viernes de noche");
+  assert.deepEqual(rangoCuando("semana", AHORA_EV), { desde: ecuador(2026, 6, 3), hasta: ecuador(2026, 6, 10) });
+  assert.deepEqual(rangoCuando("mes", AHORA_EV), { desde: ecuador(2026, 6, 3), hasta: ecuador(2026, 7, 3) });
+  assert.deepEqual(rangoCuando("hoy", ecuador(2026, 6, 3, 23, 59)), { desde: ecuador(2026, 6, 3), hasta: ecuador(2026, 6, 4) }, "a las 23:59 sigue siendo hoy");
+});
+await test("filtros de la cartelera: la URL se sanea y el enlace se reconstruye sin ruido", () => {
+  assert.deepEqual(filtrosEventoDesdeParams({}), FILTROS_EVENTO_INICIALES);
+  const f = filtrosEventoDesdeParams({ cat: "concierto", zona: "  Centro  ", cuando: "finde", gratis: "1", q: " jazz ", pagina: "3" });
+  assert.deepEqual(f, { categoria: "concierto", zona: "Centro", cuando: "finde", gratis: true, q: "jazz", pagina: 3 });
+  assert.deepEqual(filtrosEventoDesdeParams({ cat: "hackeo", cuando: "ayer", gratis: "si", pagina: "-2" }), FILTROS_EVENTO_INICIALES);
+  assert.equal(filtrosEventoDesdeParams({ pagina: "999" }).pagina, 1);
+  assert.equal(filtrosEventoDesdeParams({ q: "x".repeat(200) }).q.length, 60);
+  assert.deepEqual(filtrosEventoDesdeParams({ cat: ["teatro", "otro"] }).categoria, "teatro", "un parámetro repetido usa el primero");
+  assert.equal(filtrosEventoActivos(f), 5);
+  assert.equal(hrefCartelera(FILTROS_EVENTO_INICIALES), "/directorio/eventos");
+  assert.equal(hrefCartelera(f), "/directorio/eventos?cat=concierto&zona=Centro&cuando=finde&gratis=1&q=jazz", "sin cambios vuelve a la página 1");
+  assert.equal(hrefCartelera(f, { pagina: 4 }), "/directorio/eventos?cat=concierto&zona=Centro&cuando=finde&gratis=1&q=jazz&pagina=4");
+  assert.equal(hrefCartelera(f, { cuando: "" }), "/directorio/eventos?cat=concierto&zona=Centro&gratis=1&q=jazz", "un cambio de filtro vuelve a la página 1");
+  assert.deepEqual(filtrosEventoDesdeParams(Object.fromEntries(new URL(`http://x${hrefCartelera(f, { pagina: 3 })}`).searchParams)), f, "ida y vuelta");
+  assert.equal(patronBusqueda("100%_off\\"), "%100\\%\\_off\\\\%");
+});
+await test("vigentes y agruparPorDia: quita lo terminado o no publicado, ordena y agrupa por día de Ecuador", () => {
+  const mk = (id, inicia, extra = {}) => ({ id, titulo: id, inicia, termina: undefined, estado: "published", ...extra });
+  const lista = [
+    mk("pasado", AHORA_EV - 5 * HORA_MS),
+    mk("en-curso", AHORA_EV - HORA_MS),
+    mk("cancelado", AHORA_EV + HORA_MS, { estado: "cancelled" }),
+    mk("revision", AHORA_EV + HORA_MS, { estado: "review" }),
+    mk("noche-b", ecuador(2026, 6, 6, 21)),
+    mk("noche-a", ecuador(2026, 6, 6, 19)),
+    mk("manana", ecuador(2026, 6, 4, 10)),
+    mk("madrugada", ecuador(2026, 6, 7, 0, 30)),
+  ];
+  const v = vigentes(lista, AHORA_EV);
+  assert.deepEqual(v.map((e) => e.id), ["en-curso", "manana", "noche-a", "noche-b", "madrugada"]);
+  const g = agruparPorDia(v, AHORA_EV);
+  assert.deepEqual(g.map((x) => x.eventos.map((e) => e.id)), [["en-curso"], ["manana"], ["noche-a", "noche-b"], ["madrugada"]]);
+  assert.deepEqual([g[0].etiqueta, g[1].etiqueta], ["Hoy", "Mañana"]);
+  assert.match(g[2].etiqueta, /^s[aá]b 6 jun$/);
+  assert.equal(g[3].etiqueta, "dom 7 jun", "00:30 del domingo ya es domingo en Ecuador (05:30 UTC)");
+});
+await test("validarEvento: obligatorios, límites, fechas en hora de Ecuador y enlace https", () => {
+  const ok = { ...borradorEventoVacio("p1"), titulo: "Noche de jazz", categoria: "concierto", lugar: "Teatro Sucre", zona: "Centro", inicia: "2026-06-06T20:00" };
+  assert.deepEqual(validarEvento(ok, { nuevo: true, ahora: AHORA_EV }), {});
+  const con = (extra, nuevo = true) => validarEvento({ ...ok, ...extra }, { nuevo, ahora: AHORA_EV });
+  assert.ok(con({ proveedorId: "" }).proveedorId);
+  assert.ok(con({ titulo: "Jazz" }).titulo);
+  assert.ok(con({ titulo: "a".repeat(121) }).titulo);
+  assert.ok(con({ descripcion: "a".repeat(2001) }).descripcion);
+  assert.equal(con({ descripcion: "a".repeat(2000) }).descripcion, undefined);
+  assert.ok(con({ categoria: "" }).categoria);
+  assert.ok(con({ categoria: "hackeo" }).categoria);
+  assert.ok(con({ lugar: " " }).lugar);
+  assert.ok(con({ lugar: "a".repeat(101) }).lugar);
+  assert.ok(con({ direccion: "a".repeat(161) }).direccion);
+  assert.ok(con({ zona: "" }).zona);
+  assert.ok(con({ inicia: "" }).inicia);
+  assert.ok(con({ inicia: "mañana" }).inicia);
+  assert.ok(con({ inicia: "2026-06-03T11:59" }).inicia, "pasada (12:00 en Ecuador)");
+  assert.equal(con({ inicia: "2026-06-03T11:59" }, false).inicia, undefined, "al editar no se exige fecha futura (como en SQL)");
+  assert.ok(con({ termina: "2026-06-06T19:59" }).termina, "fin antes del inicio");
+  assert.ok(con({ termina: "2026-06-06T20:00" }).termina, "fin igual al inicio");
+  assert.equal(con({ termina: "2026-06-06T23:00" }).termina, undefined);
+  assert.ok(con({ termina: "no" }).termina);
+  for (const malo of ["http://x.com", "ftp://x.com", "https://x com", "x.com/entradas", "javascript:alert(1)"]) assert.ok(con({ enlaceEntradas: malo }).enlaceEntradas, malo);
+  assert.equal(con({ enlaceEntradas: "https://entradas.example.com/e?id=1" }).enlaceEntradas, undefined);
+});
+await test("filaEvento / filaActualizacionEvento / filaEntrada usan solo columnas que SQL concede", () => {
+  const grant = (re) => new RegExp(re, "s").exec(SQL_006)[1].split(",").map((c) => c.trim()).sort();
+  const insertEventos = grant("grant insert \\(([^)]*)\\),\\s*update \\([^)]*\\),\\s*delete on public\\.events to authenticated");
+  const updateEventos = grant("grant insert \\([^)]*\\),\\s*update \\(([^)]*)\\),\\s*delete on public\\.events to authenticated");
+  const insertEntradas = grant("grant insert \\(([^)]*)\\), update \\([^)]*\\), delete on public\\.event_ticket_types");
+  const updateEntradas = grant("grant insert \\([^)]*\\), update \\(([^)]*)\\), delete on public\\.event_ticket_types");
+  const b = { ...borradorEventoVacio("p1"), titulo: "Noche de jazz", categoria: "concierto", lugar: "Teatro Sucre", zona: "Centro", inicia: "2026-06-06T20:00", termina: "2026-06-06T23:00", enlaceEntradas: "https://x.com/e", gratis: true };
+  const fila = filaEvento(b, "https://img/x.jpg");
+  const soloInsert = insertEventos.filter((c) => c !== "images");
+  assert.deepEqual(Object.keys(fila).sort(), soloInsert, "insert de events");
+  assert.deepEqual([fila.starts_at, fila.ends_at, fila.is_free, fila.external_ticket_url, fila.cover_url], ["2026-06-07T01:00:00.000Z", "2026-06-07T04:00:00.000Z", true, "https://x.com/e", "https://img/x.jpg"]);
+  const act = filaActualizacionEvento(b);
+  assert.ok(Object.keys(act).every((c) => updateEventos.includes(c)), `update de events: ${Object.keys(act)}`);
+  assert.ok(!("provider_id" in act) && !("cover_url" in act), "sin cambio de portada ni de organizador");
+  assert.equal(filaActualizacionEvento(b, null).cover_url, null, "quitar la portada sí se envía");
+  const t = filaEntrada({ nombre: " VIP ", precio: "25,5", cupo: "40", maxPorPedido: "4", ventaHasta: "2026-06-06T18:00" }, "e1");
+  assert.deepEqual(Object.keys(t).sort(), insertEntradas);
+  assert.deepEqual([t.name, t.price, t.quantity, t.max_per_order, t.sales_end], ["VIP", 25.5, 40, 4, "2026-06-06T23:00:00.000Z"]);
+  assert.ok(Object.keys(filaEntrada({ nombre: "VIP", precio: "1", cupo: "1", maxPorPedido: "1", ventaHasta: "" })).every((c) => updateEntradas.includes(c)), "update de event_ticket_types");
+  assert.equal(filaEntrada(entradaVacia()).sales_end, null);
+  assert.ok(!("sold" in t), "las ventas las lleva el servidor");
+});
+await test("validarEntrada y validarVenta", () => {
+  const ok = { nombre: "General", precio: "12.50", cupo: "100", maxPorPedido: "6", ventaHasta: "" };
+  assert.deepEqual(validarEntrada(ok), {});
+  const con = (extra, op) => validarEntrada({ ...ok, ...extra }, op);
+  assert.ok(con({ nombre: "A" }).nombre);
+  assert.ok(con({ nombre: "a".repeat(61) }).nombre);
+  for (const p of ["", "abc", "-1", "1.234", "1000000"]) assert.ok(con({ precio: p }).precio, `precio «${p}»`);
+  for (const p of ["0", "0,50", "$20", "999999.99"]) assert.equal(con({ precio: p }).precio, undefined, `precio «${p}»`);
+  for (const c of ["0", "-5", "100001", "1.5", "x", ""]) assert.ok(con({ cupo: c }).cupo, `cupo «${c}»`);
+  assert.equal(con({ cupo: "100000" }).cupo, undefined);
+  assert.ok(con({ cupo: "5" }, { vendidas: 8 }).cupo, "no baja de lo ya reservado");
+  assert.equal(con({ cupo: "8" }, { vendidas: 8 }).cupo, undefined);
+  for (const m of ["0", "21", "x"]) assert.ok(con({ maxPorPedido: m }).maxPorPedido, `máximo «${m}»`);
+  assert.ok(con({ ventaHasta: "mañana" }).ventaHasta);
+  assert.ok(con({ ventaHasta: "2026-06-07T00:00" }, { iniciaEvento: ecuador(2026, 6, 6, 20) }).ventaHasta, "cierra después de empezar");
+  assert.equal(con({ ventaHasta: "2026-06-06T19:00" }, { iniciaEvento: ecuador(2026, 6, 6, 20) }).ventaHasta, undefined);
+  assert.equal(validarVenta(false, "", 0) !== null, true);
+  assert.equal(validarVenta(true, "", 0), null, "entrada libre");
+  assert.equal(validarVenta(false, "https://x.com", 0), null, "venta externa");
+  assert.equal(validarVenta(false, "", 1), null);
+  const d = borradorDesdeEntrada({ id: "t", eventoId: "e", nombre: "VIP", precio: 25.5, cupo: 40, vendidas: 3, maxPorPedido: 4, ventaHasta: ecuador(2026, 6, 6, 18) });
+  assert.deepEqual(d, { nombre: "VIP", precio: "25.5", cupo: "40", maxPorPedido: "4", ventaHasta: "2026-06-06T18:00" }, "ida y vuelta con la hora de Ecuador");
+});
+await test("códigos de entrada, reservas y resumen de asistentes", () => {
+  assert.equal(normalizarCodigo(" a1b2c-3d4e5 "), "A1B2C3D4E5");
+  assert.equal(codigoLegible("A1B2C3D4E5"), "A1B2C-3D4E5");
+  assert.equal(codigoLegible("corto"), "corto");
+  assert.ok(codigoValido("a1b2c-3d4e5"));
+  for (const malo of ["", "A1B2C3D4E", "A1B2C3D4E5F", "G1B2C3D4E5", "A1B2C3D4E5; drop table x"]) assert.equal(codigoValido(malo), false, malo);
+  assert.equal(contenidoQR("A1B2C3D4E5"), "A1B2C3D4E5");
+  const e = evt();
+  assert.equal(puedeCancelarReserva({ estado: "reserved" }, e, AHORA_EV), true);
+  assert.equal(puedeCancelarReserva({ estado: "reserved" }, e, e.inicia), false, "ya empezó");
+  assert.equal(puedeCancelarReserva({ estado: "checked_in" }, e, AHORA_EV), false);
+  assert.equal(puedeCancelarReserva({ estado: "cancelled" }, e, AHORA_EV), false);
+  const r = (estado, cantidad, total) => ({ estado, cantidad, total });
+  assert.deepEqual(resumenAsistentes([r("reserved", 2, 25), r("checked_in", 1, 12.5), r("cancelled", 4, 50), r("reserved", 3, 0.3)]), { reservadas: 6, ingresaron: 1, pendientes: 5, ingresos: 37.8 });
+  assert.deepEqual(resumenAsistentes([]), { reservadas: 0, ingresaron: 0, pendientes: 0, ingresos: 0 });
+  assert.equal(ocupacion({ cupo: 40, vendidas: 10 }), 25);
+  assert.equal(ocupacion({ cupo: 3, vendidas: 3 }), 100);
+  assert.equal(ocupacion({ cupo: 0, vendidas: 0 }), 0);
+  const fila = { id: "r1", event_id: "e", ticket_type_id: "t", user_id: "u", qty: 2, total: "25.00", code: "A1B2C3D4E5", status: "reserved", created_at: new Date(AHORA_EV).toISOString() };
+  assert.deepEqual([mapearReserva(fila).total, mapearReserva(fila).cantidad, mapearReserva(fila).codigo], [25, 2, "A1B2C3D4E5"]);
+  assert.equal(mapearReserva({ ...fila, status: "rara" }), null);
+  assert.equal(mapearTipoEntrada({ id: "t", event_id: "e", name: "VIP", price: "25.50", quantity: 40, sold: 3, max_per_order: 4, sales_end: null }).precio, 25.5);
+});
+await test("completitud sin catálogo (organizadores de eventos): el apartado no cuenta y el resto se reescala a 100", () => {
+  const p = { id: "e", ownerId: "u", slug: "x", vertical: "eventos", subtipo: "organizador", nombre: "Org", descripcion: "a".repeat(80), ciudad: "Cuenca", zona: "Centro", canales: ["local"], abierto24h: true, horario: {}, costoEnvio: 0, pedidoMinimo: 0, estado: "active", verificado: false, rating: 0, resenas: 0, pedidos: 0, creado: 0, logoUrl: "https://x/l.png", portadaUrl: "https://x/p.png" };
+  const con = completitudNegocio(p, { whatsapp: "0991234567" }, []);
+  const sin = completitudNegocio(p, { whatsapp: "0991234567" }, [], false);
+  assert.equal(con.porcentaje, 75, "con catálogo, sin elementos: pierde los 25 puntos");
+  assert.equal(sin.porcentaje, 100, "sin catálogo: completo");
+  assert.ok(!sin.items.some((i) => i.id === "catalogo") && sin.faltantes.length === 0);
+  assert.equal(completitudNegocio({ ...p, descripcion: "", logoUrl: undefined, portadaUrl: undefined }, null, [], false).porcentaje, 20, "solo el horario 24 h (15 de 75)");
+});
+await test("QR de una entrada: la librería genera un SVG y solo se dibujan códigos con el formato de entrada", () => {
+  const qr = qrcode(0, "M");
+  qr.addData(contenidoQR("A1B2C3D4E5"));
+  qr.make();
+  const svg = qr.createSvgTag({ cellSize: 4, margin: 2, scalable: true });
+  assert.match(svg, /^<svg /);
+  assert.equal(qr.getModuleCount(), 21, "10 caracteres caben en un QR de versión 1");
+  assert.ok(!/<script|onload|javascript:/i.test(svg));
+  assert.ok(CODIGO_ENTRADA.test("A1B2C3D4E5") && !CODIGO_ENTRADA.test("<svg onload=x>"));
+});
+await test("mensajeErrorEventos traduce los errores del servidor", () => {
+  assert.match(mensajeErrorEventos("Entradas agotadas, venta cerrada o cantidad no permitida"), /Ya no quedan entradas/);
+  assert.match(mensajeErrorEventos("Ya tienes una reserva para esta entrada"), /Mis entradas/);
+  assert.match(mensajeErrorEventos("No puedes reservar entradas de tu propio evento"), /propio evento/);
+  assert.match(mensajeErrorEventos("Código no válido para tus eventos"), /ninguno de tus eventos/);
+  assert.match(mensajeErrorEventos("Esta entrada ya fue usada"), /ya fue usada/);
+  assert.match(mensajeErrorEventos("Un organizador puede tener como máximo 30 eventos futuros"), /30 eventos/);
+  assert.match(mensajeErrorEventos("permission denied for table events"), /sesión caducó/);
+  assert.equal(mensajeErrorEventos("algo raro"), "algo raro");
+});
+await test("jsonLdEvento: Evento de schema.org con ofertas, estado y sin datos privados", () => {
+  const e = { id: "e1", proveedorId: "p1", titulo: "Noche de jazz", descripcion: "Música en vivo", categoria: "concierto", lugar: "Teatro Sucre", direccion: "Sucre y Borrero", zona: "Centro", inicia: AHORA_EV + 2 * DIA_MS, termina: AHORA_EV + 2 * DIA_MS + 3 * HORA_MS, portadaUrl: "https://img/x.jpg", imagenes: [], gratis: false, enlaceEntradas: undefined, estado: "published", creado: 0 };
+  const j = jsonLdEvento(e, { nombre: "Cultura Cuenca" }, [tipoE({ vendidas: 100 }), tipoE({ id: "t2", nombre: "VIP", precio: 25 })], "https://conectari.com/directorio/evento/e1", "https://conectari.com/directorio/eventos/cultura", AHORA_EV);
+  assert.deepEqual([j["@type"], j.name, j.eventStatus, j.organizer.name, j.location.address.addressRegion, j.location.address.streetAddress], ["Event", "Noche de jazz", "https://schema.org/EventScheduled", "Cultura Cuenca", "Centro", "Sucre y Borrero"]);
+  assert.deepEqual(j.offers.map((o) => [o.name, o.price, o.availability]), [["General", "12.50", "https://schema.org/SoldOut"], ["VIP", "25.00", "https://schema.org/InStock"]]);
+  assert.equal(j.startDate, new Date(e.inicia).toISOString());
+  assert.equal(jsonLdEvento({ ...e, estado: "cancelled" }, { nombre: "X" }, [], "u", "o", AHORA_EV).eventStatus, "https://schema.org/EventCancelled");
+  assert.equal(jsonLdEvento({ ...e, gratis: true }, { nombre: "X" }, [], "u", "o", AHORA_EV).isAccessibleForFree, true);
+  assert.ok(!/phone|telefono|whatsapp|email/i.test(JSON.stringify(j)));
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);

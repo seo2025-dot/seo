@@ -39,6 +39,9 @@ export default async function DirectorioPage() {
             <Link href="/directorio/solicitudes" className="rounded-full bg-ink px-3 py-1 font-semibold text-white transition hover:bg-brand-700">
               🙋 Solicitudes
             </Link>
+            <Link href="/directorio/entradas" className="rounded-full bg-ink px-3 py-1 font-semibold text-white transition hover:bg-brand-700">
+              🎫 Mis entradas
+            </Link>
             <span className="font-semibold">Prueba con:</span>
             {IDEAS.map((i) => (
               <Link key={i} href={`/directorio/buscar?q=${encodeURIComponent(i)}`} className="rounded-full border border-slate-200 bg-white px-3 py-1 font-medium text-slate-700 transition hover:border-brand-300 hover:text-brand-700">

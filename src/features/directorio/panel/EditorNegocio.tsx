@@ -76,7 +76,7 @@ export default function EditorNegocio({ id }: { id: string }) {
     if (hidratado) void cargar();
   }, [hidratado, cargar]);
 
-  const medidor = useMemo(() => (p ? completitudNegocio(p, contacto, items) : null), [p, contacto, items]);
+  const medidor = useMemo(() => (p ? completitudNegocio(p, contacto, items, VERTICAL_POR_ID[p.vertical].capacidades.catalogo.length > 0) : null), [p, contacto, items]);
 
   if (!hidratado || p === undefined) return <div className="mx-auto h-96 max-w-3xl animate-pulse px-4 py-10" />;
   if (!sesion.uid || p === null || !b) {
@@ -158,7 +158,7 @@ export default function EditorNegocio({ id }: { id: string }) {
     { id: "datos", etiqueta: "Datos y fotos" },
     { id: "contacto", etiqueta: "Contacto" },
     { id: "horario", etiqueta: "Horario" },
-    { id: "catalogo", etiqueta: `${v.plantilla.item.plural[0].toUpperCase()}${v.plantilla.item.plural.slice(1)} (${items.length})` },
+    ...(v.capacidades.catalogo.length > 0 ? [{ id: "catalogo" as const, etiqueta: `${v.plantilla.item.plural[0].toUpperCase()}${v.plantilla.item.plural.slice(1)} (${items.length})` }] : []),
     ...(v.capacidades.turnos ? [{ id: "turnos" as const, etiqueta: "Turnos" }] : []),
     { id: "visibilidad", etiqueta: "Visibilidad" },
   ];

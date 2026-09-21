@@ -147,7 +147,7 @@ export const VERTICALES: Vertical[] = [
   },
   {
     id: "eventos",
-    activa: false,
+    activa: true,
     buscador: "Concierto, teatro, taller…",
     plantilla: { canales: ["local"], tipoItem: "service", item: { singular: "servicio", plural: "servicios" }, secciones: [], ejemplos: [], horario: "lun-vie" },
     alias: "eventos",

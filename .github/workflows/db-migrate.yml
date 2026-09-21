@@ -9,7 +9,7 @@ on:
       archivo:
         description: Actualización a aplicar
         required: true
-        default: supabase/update_008_pedidos.sql
+        default: supabase/update_009_eventos.sql
         type: choice
         options:
           - supabase/update_002_fotos_onboarding.sql
@@ -19,6 +19,7 @@ on:
           - supabase/update_006_directorios.sql
           - supabase/update_007_buscador_universal.sql
           - supabase/update_008_pedidos.sql
+          - supabase/update_009_eventos.sql
 
 jobs:
   migrar:
