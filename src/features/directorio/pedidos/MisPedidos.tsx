@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { FalloOperacion } from "@/features/monedas/Piezas";
 import { useSocial } from "@/context/SocialContext";
 import { AvisoCaducidad, InsigniaEstado, useAhora } from "@/features/directorio/pedidos/Piezas";
 import { cambiarEstadoPedido, usePedidos } from "@/features/directorio/pedidos/usePedidos";
@@ -66,9 +67,7 @@ export default function MisPedidos() {
       <p className="text-slate-500">Sigue tus pedidos de comida y farmacia. Se actualizan solos.</p>
 
       {(error || fallo) && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-          {error ?? fallo}
-        </p>
+        <FalloOperacion texto={error ?? fallo ?? ""} className="mt-4" />
       )}
 
       {(pedidos ?? []).length === 0 && !error ? (

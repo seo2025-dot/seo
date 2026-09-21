@@ -33,6 +33,7 @@ const COLUMNAS: { titulo: string; enlaces: { href: string; label: string }[] }[]
       { href: "/publicar", label: "Publicar gratis" },
       { href: "/verificacion", label: "Verificar mi identidad" },
       { href: "/recompensas", label: "Recompensas" },
+      { href: "/monedas", label: "Monedas y recargas" },
       { href: "/contacto", label: "Contacto" },
     ],
   },

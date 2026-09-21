@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { useRouter } from "next/navigation";
 import { useSocial } from "@/context/SocialContext";
 import { ZONAS } from "@/data/catalogos";
@@ -279,13 +280,14 @@ export default function PaginaCarrito() {
 
         <ResumenErrores errores={errores} />
         {fallo && (
-          <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-800">
-            {fallo}
-          </p>
+          <FalloOperacion texto={fallo ?? ""} />
         )}
 
         {sesion.uid ? (
           <div>
+            <p className="mb-2 text-center">
+              <CosteAccion accion="order_place" />
+            </p>
             <button type="submit" disabled={enviando || !!bloqueo || verificando} className="boton-marca w-full rounded-full px-8 py-3.5 text-base font-bold text-white disabled:opacity-60">
               {enviando ? "Enviando…" : `Enviar pedido · ${textoDinero(t.total)}`}
             </button>

@@ -47,3 +47,5 @@ jobs:
       - run: npx tsx supabase/tests/db.test.mjs
       - run: npx tsx supabase/tests/directorios.test.mjs
       - run: npx tsx supabase/tests/directorio-ui.test.mjs
+      - run: npx tsx supabase/tests/monedas.test.mjs
+      - run: npx tsx supabase/tests/pagos.test.mjs

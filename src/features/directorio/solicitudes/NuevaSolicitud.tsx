@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSocial } from "@/context/SocialContext";
 import { ZONAS } from "@/data/catalogos";
@@ -200,10 +201,11 @@ export default function NuevaSolicitud() {
 
         <ResumenErrores errores={errores} />
         {fallo && (
-          <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-800">
-            {fallo}
-          </p>
+          <FalloOperacion texto={fallo ?? ""} />
         )}
+        <p className="text-center">
+          <CosteAccion accion="request_create" />
+        </p>
         <button type="submit" disabled={enviando} className="boton-marca w-full rounded-full px-8 py-3.5 text-base font-bold text-white disabled:opacity-60">
           {enviando ? "Publicando…" : "Pedir ofertas"}
         </button>

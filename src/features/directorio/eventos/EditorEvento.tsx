@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSocial } from "@/context/SocialContext";
 import { ZONAS } from "@/data/catalogos";
@@ -336,8 +337,11 @@ export default function EditorEvento({ id }: { id?: string }) {
 
         <ResumenErrores errores={errores} />
         {fallo && (
-          <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-800">
-            {fallo}
+          <FalloOperacion texto={fallo ?? ""} />
+        )}
+        {!soloLectura && !editando && (
+          <p className="text-center">
+            <CosteAccion accion="event_publish" />
           </p>
         )}
         {!soloLectura && (

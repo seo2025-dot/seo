@@ -154,6 +154,9 @@ export default function RecompensasPage() {
             <div>
               <p className="text-sm font-medium text-white/80">Tu saldo</p>
               <p className="text-5xl font-extrabold tabular-nums">💰 {estado.monedas}</p>
+              <Link href="/monedas" className="mt-1 inline-block rounded-full bg-white/20 px-3 py-1 text-xs font-bold text-white transition hover:bg-white/30">
+                + Recargar desde $0.50
+              </Link>
               <p className="mt-1 text-sm text-white/80">🔥 Racha: {estado.racha} {estado.racha === 1 ? "día" : "días"} · ❤️ Super Likes: {estado.superLikes} · 🔮 Tiradas premium: {estado.tiradasPremium}</p>
             </div>
             <motion.button

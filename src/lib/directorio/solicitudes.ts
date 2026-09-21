@@ -1,3 +1,4 @@
+import { mensajeSaldoInsuficiente } from "@/lib/monedas";
 import { VERTICAL_POR_ID, VERTICALES, type VerticalId } from "@/data/directorio";
 import type { Errores } from "@/lib/directorio/validacion";
 import type { Proveedor } from "@/types/directorio";
@@ -337,6 +338,8 @@ export function destacadas(ofertas: Pick<Oferta, "id" | "estado" | "precio" | "m
 
 /** Mensaje claro para los errores de las funciones de solicitudes y ofertas. */
 export function mensajeErrorSolicitud(mensaje: string): string {
+  const saldo = mensajeSaldoInsuficiente(mensaje);
+  if (saldo) return saldo; // «🪙 Necesitas 5 monedas para aceptar este pedido…»
   if (/5 solicitudes abiertas/.test(mensaje)) return "Ya tienes 5 solicitudes abiertas. Cierra alguna o espera a que caduque.";
   if (/verificar tu identidad/.test(mensaje)) return "Para ofertar viajes y encomiendas debes verificar tu identidad.";
   if (/ya no está abierta/.test(mensaje)) return "Esa solicitud ya no está abierta.";

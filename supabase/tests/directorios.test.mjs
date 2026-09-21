@@ -95,6 +95,8 @@ const persona = async (nombre, { verificada = false, admin = false } = {}) => {
   await q("insert into auth.users (id, email, raw_user_meta_data, email_confirmed_at) values ($1, $2, $3, now())", [id, `${nombre.toLowerCase()}@test.dev`, JSON.stringify({ full_name: nombre })]);
   if (verificada) await q("update public.profiles set identity_verified = true, kyc_status = 'verified' where id = $1", [id]);
   if (admin) await q("insert into public.app_admins (user_id) values ($1)", [id]);
+  // Estas pruebas no miden la economía de monedas (eso lo hace monedas.test.mjs): saldo de sobra para no toparse con las tarifas de uso.
+  await q("update public.wallets set coins = 100000 where user_id = $1", [id]);
   return id;
 };
 /** Crea un perfil como esa persona (así se prueban los privilegios por columna). */
@@ -176,7 +178,7 @@ await test("recompensa de autoservicio: +30 monedas solo por el primer perfil", 
   assert.equal(await monedas(), MONEDAS_PRIMER_PERFIL);
   await perfil(dueno, { vertical: "hogar", subtype: "plomero", name: "Plomería Express" });
   assert.equal(await monedas(), MONEDAS_PRIMER_PERFIL, "el segundo perfil no vuelve a pagar");
-  assert.equal((await q("select coins from public.wallets where user_id = $1", [dueno]))[0].coins, 20 + MONEDAS_PRIMER_PERFIL);
+  assert.equal((await q("select coins from public.wallets where user_id = $1", [dueno]))[0].coins, 100000 + MONEDAS_PRIMER_PERFIL);
 });
 await test("validaciones: categoría de otra sección, canales, horario, nombre y límite de perfiles", async () => {
   await falla(perfil(cliente, { vertical: "salud", subtype: "plomero" }), /no existe en esta secci/);

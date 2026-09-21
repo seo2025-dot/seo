@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { FalloOperacion } from "@/features/monedas/Piezas";
 import ControlAcceso from "@/features/directorio/eventos/ControlAcceso";
 import { useMisEventos, useMisOrganizadores, type EventoDelPanel } from "@/features/directorio/eventos/useEventosPanel";
 import { categoriaEvento, faseEvento, mensajeErrorEventos, ocupacion, resumenAsistentes, textoFechaCorta, textoPrecioEvento } from "@/lib/directorio/eventos";
@@ -114,9 +115,7 @@ export default function PanelEventos() {
       </header>
 
       {(error || errorOrg || fallo) && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-          {error ?? errorOrg ?? fallo}
-        </p>
+        <FalloOperacion texto={error ?? errorOrg ?? fallo ?? ""} className="mt-4" />
       )}
 
       {sinPerfil ? (

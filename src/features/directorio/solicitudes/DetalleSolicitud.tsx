@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { useSearchParams } from "next/navigation";
 import { useSocial } from "@/context/SocialContext";
 import { Campo, claseCampo } from "@/features/directorio/alta/Campos";
@@ -82,9 +83,7 @@ export default function DetalleSolicitud({ id }: { id: string }) {
       </section>
 
       {(fallo || error) && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-          {fallo ?? error}
-        </p>
+        <FalloOperacion texto={fallo ?? error ?? ""} className="mt-4" />
       )}
 
       {soyYo ? (
@@ -286,10 +285,9 @@ function ZonaProfesional({
             <textarea id="of-msg" value={datos.mensaje} onChange={(e) => setDatos({ ...datos, mensaje: e.target.value })} rows={2} maxLength={300} aria-invalid={!!errores.mensaje} className={claseCampo} />
           </Campo>
           {fallo && (
-            <p role="alert" className="rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-              {fallo}
-            </p>
+            <FalloOperacion texto={fallo ?? ""} />
           )}
+          {!miOferta && <CosteAccion accion="offer_send" />}
           <div className="flex flex-wrap gap-2">
             <button type="submit" disabled={enviando} className="boton-marca rounded-full px-7 py-2.5 text-sm font-bold text-white disabled:opacity-60">
               {enviando ? "Enviando…" : miOferta ? "Actualizar oferta" : "Enviar oferta"}

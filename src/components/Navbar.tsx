@@ -120,8 +120,8 @@ export default function Navbar() {
           {sesion.uid ? (
             <>
               <Link
-                href="/recompensas"
-                title="Recompensas"
+                href="/monedas"
+                title="Mis monedas"
                 className="flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-sm font-semibold text-ink transition hover:border-brand-300 hover:text-brand-700"
               >
                 <Icono nombre="recompensas" className="h-4 w-4 text-brand-600" />

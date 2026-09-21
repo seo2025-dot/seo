@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useSocial } from "@/context/SocialContext";
 import { guardarCarrito, obtenerCarrito } from "@/features/directorio/carrito/almacen";
@@ -116,12 +117,11 @@ export default function DetallePedido({ id }: { id: string }) {
       </section>
 
       {(fallo || error) && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-          {fallo ?? error}
-        </p>
+        <FalloOperacion texto={fallo ?? error ?? ""} className="mt-4" />
       )}
 
       <div className="mt-4 flex flex-wrap gap-2">
+        {acciones.some((a) => a.estado === "accepted") && <CosteAccion accion="order_accept" className="self-center" />}
         {acciones.map((a) => (
           <button key={a.estado} type="button" disabled={ocupado} onClick={() => void cambiar(a.estado, a.estado === "rejected" ? "¿Rechazar este pedido? La persona recibirá un aviso." : undefined)} className={`rounded-full px-6 py-2.5 text-sm font-bold disabled:opacity-60 ${CLASE_BOTON[a.tono]}`}>
             {a.etiqueta}

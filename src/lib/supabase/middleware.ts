@@ -19,6 +19,7 @@ const PROTEGIDAS = [
   "/directorio/pedidos",
   "/directorio/solicitudes",
   "/directorio/entradas",
+  "/monedas",
   "/admin",
   "/onboarding",
 ];

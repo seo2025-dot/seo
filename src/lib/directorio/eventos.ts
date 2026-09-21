@@ -1,3 +1,4 @@
+import { mensajeSaldoInsuficiente } from "@/lib/monedas";
 import { instanteEcuador, valorLocalEcuador } from "@/lib/directorio/horarios";
 import type { Errores } from "@/lib/directorio/validacion";
 import type { Proveedor } from "@/types/directorio";
@@ -547,6 +548,8 @@ export const ocupacion = (t: Pick<TipoEntrada, "cupo" | "vendidas">) => (t.cupo 
 
 /** Mensaje claro para los errores de las funciones de eventos y entradas. */
 export function mensajeErrorEventos(mensaje: string): string {
+  const saldo = mensajeSaldoInsuficiente(mensaje);
+  if (saldo) return saldo; // «🪙 Necesitas 5 monedas para aceptar este pedido…»
   if (/agotadas, venta cerrada|cantidad no permitida/.test(mensaje)) return "Ya no quedan entradas o se cerró la venta. Actualiza la pantalla.";
   if (/Ya tienes una reserva/.test(mensaje)) return "Ya tienes una reserva de esta entrada. Cancélala desde «Mis entradas» si quieres cambiarla.";
   if (/propio evento/.test(mensaje)) return "No puedes reservar entradas de tu propio evento.";

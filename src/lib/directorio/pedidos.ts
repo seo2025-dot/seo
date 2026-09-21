@@ -1,3 +1,4 @@
+import { mensajeSaldoInsuficiente } from "@/lib/monedas";
 import { transicionesPedido, type EstadoPedido } from "@/data/directorio";
 import { cambiarCantidad, totales, tiposDisponibles, type Carrito, type InfoNegocio, type TipoPedido } from "@/lib/directorio/carrito";
 import { telefonoValido } from "@/lib/directorio/contacto";
@@ -270,6 +271,8 @@ export function argumentosPedido(d: DatosPago, c: Carrito) {
 
 /** Mensaje claro para los errores de `place_order()` y `set_order_status()`. */
 export function mensajeErrorPedido(mensaje: string): string {
+  const saldo = mensajeSaldoInsuficiente(mensaje);
+  if (saldo) return saldo; // «🪙 Necesitas 5 monedas para aceptar este pedido…»
   if (/demasiados pedidos sin responder/.test(mensaje)) return "Tienes varios pedidos esperando respuesta. Espera a que los atiendan o cancélalos desde «Mis pedidos».";
   if (/ya no está disponible|Este perfil no está disponible/.test(mensaje)) return "Algo de tu pedido ya no está disponible. Revisa tu carrito.";
   if (/pedido mínimo/.test(mensaje)) return mensaje;

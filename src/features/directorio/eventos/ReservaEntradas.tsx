@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { useSocial } from "@/context/SocialContext";
 import CodigoQR from "@/features/directorio/eventos/CodigoQR";
 import {
@@ -74,6 +75,7 @@ export default function ReservaEntradas({ evento, tiposIniciales, duenoId }: { e
       <h2 id="entradas-titulo" className="text-xl font-black text-ink">
         Entradas
       </h2>
+      {tipos.length > 0 && fase === "proximo" && <CosteAccion accion="event_reserve" className="mt-1" />}
 
       {fase === "cancelado" && (
         <p role="status" className="mt-3 rounded-xl bg-rose-50 p-3 text-sm font-semibold text-rose-800">
@@ -175,9 +177,7 @@ export default function ReservaEntradas({ evento, tiposIniciales, duenoId }: { e
       )}
 
       {fallo && (
-        <p role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm font-medium text-rose-800">
-          {fallo}
-        </p>
+        <FalloOperacion texto={fallo ?? ""} className="mt-3" />
       )}
 
       {evento.enlaceEntradas && fase === "proximo" && (

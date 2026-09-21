@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { FalloOperacion, CosteAccion } from "@/features/monedas/Piezas";
 import { AvisoCaducidad, InsigniaEstado, useAhora } from "@/features/directorio/pedidos/Piezas";
 import { cambiarEstadoPedido, usePedidos, type PedidoConCliente } from "@/features/directorio/pedidos/usePedidos";
 import { textoDinero } from "@/lib/directorio/mapeo";
@@ -48,9 +49,7 @@ export default function BandejaNegocio() {
       <p className="text-slate-500">Responde rápido: los pedidos sin respuesta se cancelan solos a las 3 horas.</p>
 
       {(error || fallo) && (
-        <p role="alert" className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-800">
-          {error ?? fallo}
-        </p>
+        <FalloOperacion texto={error ?? fallo ?? ""} className="mt-4" />
       )}
 
       {GRUPOS.map(({ id, titulo, vacio }) => (
@@ -82,6 +81,7 @@ export default function BandejaNegocio() {
                     <AvisoCaducidad pedido={p} ahora={ahora} comoNegocio />
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
+                    {accionesNegocio(p.tipo, p.estado).some((a) => a.estado === "accepted") && <CosteAccion accion="order_accept" className="self-center" />}
                     {accionesNegocio(p.tipo, p.estado).map((a) => (
                       <button key={a.estado} type="button" disabled={ocupado === p.id} onClick={() => void cambiar(p, a.estado)} className={`rounded-full px-5 py-2 text-sm font-bold disabled:opacity-60 ${CLASE_BOTON[a.tono]}`}>
                         {a.etiqueta}
