@@ -8,6 +8,7 @@ import BotonesOAuth from "@/components/auth/BotonesOAuth";
 import { campoCls } from "@/components/publicar/comunes";
 import PruebaSocial from "@/components/PruebaSocial";
 import { codigoValido } from "@/lib/referidos";
+import { avisarAlEquipo } from "@/lib/avisos/ping";
 
 const destinoSeguro = (next: string | null) => (next && next.startsWith("/") && !next.startsWith("//") ? next : "/perfil");
 
@@ -49,6 +50,7 @@ function Formulario() {
       setError("Ese correo ya tiene una cuenta. Inicia sesión.");
       return;
     }
+    avisarAlEquipo(); // el correo de aviso al administrador sale ya (si falla, queda en la cola)
     if (data.session) window.location.assign(destino); // confirmación de correo desactivada en el proyecto
     else setEnviado(true);
   };

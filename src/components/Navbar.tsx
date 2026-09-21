@@ -11,6 +11,7 @@ import Avatar from "@/components/Avatar";
 import Icono, { type NombreIcono } from "@/components/Icono";
 import { TextoConMonedas } from "@/components/IconoMoneda";
 import RelojCiudad from "@/components/RelojCiudad";
+import { supabase } from "@/lib/supabaseClient";
 
 const esActivo = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -102,6 +103,38 @@ function Notificaciones() {
   );
 }
 
+/**
+ * Acceso directo al panel de administración: solo lo ve un administrador y muestra cuántas verificaciones de identidad esperan.
+ * (El recuento lo lee la propia base de datos: solo un administrador puede ver las solicitudes de los demás.)
+ */
+function EnlaceAdmin() {
+  const { esAdmin } = useSocial();
+  const pathname = usePathname();
+  const [pendientes, setPendientes] = useState(0);
+
+  useEffect(() => {
+    if (!esAdmin) return;
+    let vivo = true;
+    void Promise.resolve(supabase().from("kyc_submissions").select("id", { count: "exact", head: true }).eq("status", "pending")).then(({ count }) => vivo && setPendientes(count ?? 0));
+    return () => {
+      vivo = false;
+    };
+  }, [esAdmin, pathname]);
+
+  if (!esAdmin) return null;
+  return (
+    <Link
+      href="/admin"
+      title="Panel de administración"
+      className="relative flex items-center gap-1.5 rounded-full bg-violet-600 px-3 py-1.5 text-sm font-bold text-white transition hover:bg-violet-700"
+    >
+      <Icono nombre="perfil" className="h-4 w-4" />
+      <span className="hidden sm:inline">Admin</span>
+      <Insignia n={pendientes} className="-right-1.5 -top-1.5" />
+    </Link>
+  );
+}
+
 export default function Navbar() {
   const { estado, sesion } = useSocial();
 
@@ -132,6 +165,7 @@ export default function Navbar() {
                 <Icono nombre="recompensas" className="h-4 w-4 text-brand-600" />
                 <span className="tabular-nums">{estado.monedas}</span>
               </Link>
+              <EnlaceAdmin />
               <Notificaciones />
               <Link href="/perfil" aria-label="Mi perfil" className="hidden rounded-full transition hover:opacity-80 md:block">
                 <Avatar nombre={estado.yo.nombre} foto={estado.yo.foto} tamano="sm" />

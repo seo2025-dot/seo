@@ -47,6 +47,9 @@ export default function PanelAdminMonedas() {
           <p className="text-slate-500">Ventas, tarifas, paquetes, retos y soporte. Todo cambio queda registrado.</p>
         </div>
         <nav aria-label="Otras áreas de administración" className="flex gap-2 text-sm">
+          <Link href="/admin" className="rounded-full border border-slate-300 px-4 py-1.5 font-semibold text-slate-600 hover:border-brand-400">
+            Resumen
+          </Link>
           <Link href="/admin/kyc" className="rounded-full border border-slate-300 px-4 py-1.5 font-semibold text-slate-600 hover:border-brand-400">
             Identidad
           </Link>

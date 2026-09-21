@@ -1,4 +1,5 @@
-import { NextResponse, type NextRequest } from "next/server";
+import { after, NextResponse, type NextRequest } from "next/server";
+import { procesarAvisosDelServidor } from "@/lib/avisos/servidor";
 import { supabaseServidor } from "@/lib/supabase/server";
 
 /** Solo se permiten redirecciones internas (evita open redirect). */
@@ -15,7 +16,10 @@ export async function GET(request: NextRequest) {
   if (code) {
     const supabase = await supabaseServidor();
     const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) return NextResponse.redirect(`${origin}${destino}`);
+    if (!error) {
+      after(() => procesarAvisosDelServidor().catch(() => {})); // registro con Google o correo confirmado: avisa al administrador
+      return NextResponse.redirect(`${origin}${destino}`);
+    }
   }
   return NextResponse.redirect(`${origin}/login?error=${encodeURIComponent("No se pudo completar el inicio de sesión. Inténtalo de nuevo.")}`);
 }

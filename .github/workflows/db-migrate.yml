@@ -9,7 +9,7 @@ on:
       archivo:
         description: Actualización a aplicar
         required: true
-        default: supabase/update_013_genero_y_preferencias.sql
+        default: supabase/update_014_admin_alertas.sql
         type: choice
         options:
           - supabase/update_002_fotos_onboarding.sql
@@ -24,6 +24,7 @@ on:
           - supabase/update_011_admin_monedas.sql
           - supabase/update_012_geolocalizacion.sql
           - supabase/update_013_genero_y_preferencias.sql
+          - supabase/update_014_admin_alertas.sql
 
 jobs:
   migrar:

@@ -47,6 +47,7 @@ import {
 } from "@/lib/supabase/mapeo";
 import { subirKyc, subirMedia, subirVarias } from "@/lib/supabase/subida";
 import { TextoConMonedas } from "@/components/IconoMoneda";
+import { avisarAlEquipo } from "@/lib/avisos/ping";
 
 // ───────────────────────────── Tipos públicos ─────────────────────────────
 
@@ -1440,6 +1441,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
         const [ruta1, ruta2] = await Promise.all([subirKyc(documento, yo, "documento"), subirKyc(selfie, yo, "selfie")]);
         const { error } = await supabase().rpc("submit_kyc", { p_doc_path: ruta1, p_selfie_path: ruta2 });
         if (error) throw error;
+        avisarAlEquipo();
         await recargarPerfilPropio();
         return true;
       });
