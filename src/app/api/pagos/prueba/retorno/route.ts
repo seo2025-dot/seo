@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { pasarelasDisponibles, urlResultado } from "@/lib/pagos/config";
 import { configPasarelas, depsPagos } from "@/lib/pagos/servidor";
 import { supabaseServidor } from "@/lib/supabase/server";
+import { origenPublico } from "@/lib/origen";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   const url = new URL(req.url);
-  const destino = (estado: Parameters<typeof urlResultado>[0], ref?: string) => NextResponse.redirect(new URL(urlResultado(estado, ref), url.origin), 303);
+  const destino = (estado: Parameters<typeof urlResultado>[0], ref?: string) => NextResponse.redirect(new URL(urlResultado(estado, ref), origenPublico(req)), 303);
   const ref = url.searchParams.get("ref") ?? "";
   const deps = depsPagos();
   if (!pasarelasDisponibles(configPasarelas()).prueba || !deps || !/^[0-9a-f]{32}$/.test(ref)) return destino("error");

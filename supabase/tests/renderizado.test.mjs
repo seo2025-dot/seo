@@ -12,6 +12,7 @@ import fs from "node:fs";
 import path from "node:path";
 import * as modConfig from "../../next.config.ts";
 import { esErrorDeCarga, puedeRecargarPorCarga } from "@/lib/carga";
+import { origenPublico } from "@/lib/origen";
 
 let ok = 0;
 let fallos = 0;
@@ -109,6 +110,31 @@ await test("las rutas de retorno de las pasarelas de pago siempre redirigen a un
   }
   assert.match(fuente("src/app/api/pagos/cancelado/route.ts"), /NextResponse\.redirect/);
   assert.match(fuente("src/app/auth/callback/route.ts"), /NextResponse\.redirect/);
+});
+
+console.log("\nDirecciones públicas (redirecciones tras confirmar el correo o pagar)");
+const pet = (url, cab = {}) => ({ url, headers: { get: (n) => cab[n.toLowerCase()] ?? null } });
+await test("origenPublico: usa la dirección configurada; detrás del proxy jamás la interna (0.0.0.0:3000 / localhost)", () => {
+  const interna = "https://0.0.0.0:3000/auth/callback?code=x";
+  assert.equal(origenPublico(pet(interna), { NEXT_PUBLIC_SITE_URL: "https://conectari.com" }), "https://conectari.com");
+  assert.equal(origenPublico(pet(interna), { NEXT_PUBLIC_SITE_URL: " https://conectari.com/ruta/mal/ " }), "https://conectari.com", "solo el origen, nunca una ruta");
+  assert.equal(origenPublico(pet(interna, { "x-forwarded-host": "conectari.com", "x-forwarded-proto": "https" }), {}), "https://conectari.com", "sin configuración, las cabeceras del proxy");
+  assert.equal(origenPublico(pet(interna, { "x-forwarded-host": "www.conectari.com, otro.com", "x-forwarded-proto": "http, https" }), {}), "http://www.conectari.com");
+  assert.equal(origenPublico(pet(interna, { "x-forwarded-host": "conectari.com" }), {}), "https://conectari.com", "sin protocolo indicado: https");
+  assert.equal(origenPublico(pet("http://localhost:3000/x"), {}), "http://localhost:3000", "en desarrollo local, la de la petición");
+  // Valores manipulados o inválidos se ignoran
+  assert.equal(origenPublico(pet(interna, { "x-forwarded-host": "malo.com/ruta?x=1" }), { NEXT_PUBLIC_SITE_URL: "no es una url" }), "https://0.0.0.0:3000");
+  assert.equal(origenPublico(pet(interna), { NEXT_PUBLIC_SITE_URL: "javascript:alert(1)" }), "https://0.0.0.0:3000");
+  assert.equal(origenPublico(pet(interna), { NEXT_PUBLIC_SITE_URL: "ftp://x.com" }), "https://0.0.0.0:3000");
+});
+await test("ninguna ruta redirige con la dirección interna de la petición (callback de acceso y retornos de pago)", () => {
+  const rutas = ["src/app/auth/callback/route.ts", "src/app/api/pagos/cancelado/route.ts", "src/app/api/pagos/paypal/retorno/route.ts", "src/app/api/pagos/payphone/retorno/route.ts", "src/app/api/pagos/prueba/retorno/route.ts"];
+  for (const r of rutas) {
+    const src = fuente(r);
+    assert.match(src, /origenPublico\(/, r);
+    assert.ok(!/(url|request|req)\.origin|\{ searchParams, origin \}/.test(src), r + " usa la dirección interna");
+  }
+  assert.match(fuente("src/lib/pagos/servidor.ts"), /origenPublico\(req\)/);
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);

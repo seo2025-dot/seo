@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { urlResultado } from "@/lib/pagos/config";
 import { completarPayPal } from "@/lib/pagos/flujo";
 import { configPasarelas, depsPagos } from "@/lib/pagos/servidor";
+import { origenPublico } from "@/lib/origen";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,7 +15,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const cfg = configPasarelas().paypal;
   const deps = depsPagos();
-  const destino = (estado: Parameters<typeof urlResultado>[0], ref?: string) => NextResponse.redirect(new URL(urlResultado(estado, ref), url.origin), 303);
+  const destino = (estado: Parameters<typeof urlResultado>[0], ref?: string) => NextResponse.redirect(new URL(urlResultado(estado, ref), origenPublico(req)), 303);
   if (!cfg || !deps) return destino("error");
   const r = await completarPayPal(deps, cfg, { token: url.searchParams.get("token"), ref: url.searchParams.get("ref") });
   return destino(r.estado, r.clientRef);
