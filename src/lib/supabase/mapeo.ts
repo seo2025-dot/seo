@@ -1,3 +1,4 @@
+import type { Busca, Genero } from "@/lib/genero";
 import type { Propiedad, TipoPropiedad } from "@/types/propiedad";
 import type { CategoriaServicio, Demanda, Gig, Negocio, Notificacion, Vacante, Vehiculo } from "@/types/mercado";
 import type {
@@ -53,6 +54,8 @@ export interface PrivadoPropio {
   parejaIdeal?: string | null;
   parejaIdealValores?: string[] | null;
   parejaIdealEstilo?: string[] | null;
+  genero?: Genero | null;
+  quiereConocer?: Busca | null;
 }
 
 export function mapearPerfil(p: PerfilFila, yo: string | null, privado?: PrivadoPropio): Usuario {
@@ -81,6 +84,8 @@ export function mapearPerfil(p: PerfilFila, yo: string | null, privado?: Privado
     parejaIdeal: privado?.parejaIdeal ?? undefined,
     parejaIdealValores: privado?.parejaIdealValores ?? undefined,
     parejaIdealEstilo: privado?.parejaIdealEstilo ?? undefined,
+    genero: privado?.genero ?? undefined,
+    quiereConocer: privado?.quiereConocer ?? undefined,
     valores: p.core_values ?? [],
     universidad: p.university ?? undefined,
     colegio: p.school ?? undefined,

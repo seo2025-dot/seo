@@ -1675,6 +1675,111 @@ await test("MIGRACIÓN: update_012 sobre una base con 011 (dos veces) conserva n
   }
 });
 
+// ── Género y a quién quiere conocer cada persona (update_013) ───────────────
+console.log("\nGénero y preferencias (update_013)");
+const inscrita = async (nombre, genero, busca) => {
+  const id = await persona(nombre);
+  await q("update public.profiles set onboarding_completed = true, age = 30, bio = 'Perfil de prueba' where id = $1", [id]);
+  await q("update public.user_private set gender = $2, interested_in = $3 where user_id = $1", [id, genero, busca]);
+  return id;
+};
+await test("género y preferencia: son privados, con valores del catálogo, y se editan solo por su dueña o dueño", async () => {
+  const ana = await persona("GenAna");
+  const beto = await persona("GenBeto");
+  await como(ana, "update public.user_private set gender = 'mujer', interested_in = 'hombres' where user_id = $1", [ana]);
+  const [propio] = await como(ana, "select gender, interested_in from public.user_private where user_id = $1", [ana]);
+  assert.deepEqual([propio.gender, propio.interested_in], ["mujer", "hombres"]);
+  assert.equal((await como(beto, "select gender from public.user_private where user_id = $1", [ana])).length, 0, "nadie más ve el género");
+  await falla(como(null, "select gender from public.user_private"), /permission denied/);
+  await falla(como(ana, "update public.user_private set gender = 'otro' where user_id = $1", [ana]), /violates check/);
+  await falla(como(ana, "update public.user_private set interested_in = 'nadie' where user_id = $1", [ana]), /violates check/);
+  assert.equal((await como(beto, "update public.user_private set gender = 'hombre' where user_id = $1 returning user_id", [ana])).length, 0, "no se edita el de otra persona");
+  assert.equal((await q("select gender from public.user_private where user_id = $1", [ana]))[0].gender, "mujer");
+  // No está en profiles (que es público): ningún perfil ajeno lo expone
+  assert.equal((await q("select count(*)::int n from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name in ('gender', 'interested_in')"))[0].n, 0);
+  await falla(como(ana, "select public._seek_ok('todos', 'mujer')"), /permission denied/);
+});
+await test("recommend_people y people_i_may_meet: solo aparecen quienes encajan en los DOS sentidos", async () => {
+  const ana = await inscrita("EncajaAna", "mujer", "hombres");
+  const beto = await inscrita("EncajaBeto", "hombre", "mujeres");
+  const caro = await inscrita("EncajaCaro", "mujer", "mujeres");
+  const dani = await inscrita("EncajaDani", "hombre", "todos");
+  const eli = await inscrita("EncajaEli", "no_dice", "todos");
+  const antigua = await inscrita("EncajaAntigua", null, null); // inscrita antes de la 013: sin datos
+  const grupo = [ana, beto, caro, dani, eli, antigua];
+  const nombre = { [ana]: "ana", [beto]: "beto", [caro]: "caro", [dani]: "dani", [eli]: "eli", [antigua]: "antigua" };
+  const recomendadas = async (uid) => (await como(uid, "select person_id from public.recommend_people(null, null, null, null, 60, 0)")).map((r) => r.person_id).filter((id) => grupo.includes(id)).map((id) => nombre[id]).sort();
+  const conocibles = async (uid) => (await como(uid, "select public.people_i_may_meet() id")).map((r) => r.id).filter((id) => grupo.includes(id)).map((id) => nombre[id]).sort();
+  const esperado = {
+    // ana (mujer, busca hombres): beto y dani son hombres y la quieren conocer; la antigua no dijo su género
+    [ana]: ["beto", "dani"],
+    // beto (hombre, busca mujeres): ana lo busca; caro solo busca mujeres; eli y la antigua no son «mujer»
+    [beto]: ["ana"],
+    // caro (mujer, busca mujeres): ninguna otra mujer del grupo busca mujeres (ana busca hombres)
+    [caro]: [],
+    // dani (hombre, todos): quienes lo aceptan (ana busca hombres, eli busca todos, la antigua no tiene preferencia)
+    [dani]: ["ana", "antigua", "eli"],
+    // eli (no_dice, todos): solo quienes buscan «todos» o no tienen preferencia
+    [eli]: ["antigua", "dani"],
+    // la antigua (sin preferencia) ve a quienes la aceptan a ella: quien busca algo concreto exige el género correcto y ella no lo dijo
+    [antigua]: ["dani", "eli"],
+  };
+  for (const uid of grupo) {
+    assert.deepEqual(await recomendadas(uid), esperado[uid], `recommend_people de ${nombre[uid]}`);
+    assert.deepEqual(await conocibles(uid), esperado[uid], `people_i_may_meet de ${nombre[uid]}`);
+  }
+  assert.ok(!(await como(ana, "select public.people_i_may_meet() id")).some((r) => r.id === ana), "nunca se incluye a sí misma");
+  await falla(como(null, "select public.people_i_may_meet()"), /permission denied/);
+});
+await test("MIGRACIÓN: update_013 sobre una base con 012 (dos veces) conserva perfiles y añade género, preferencia y el filtro", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-013-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-013-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 013 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_013_genero_y_preferencias.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_013 difieren");
+  await server.createDatabase("migracion13");
+  const m = new pg.Client({ ...conn, database: "migracion13" });
+  await m.connect();
+  m.on("notice", () => {});
+  const como13 = async (uid, sql, params = []) => {
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: uid, role: "authenticated" })]);
+    try {
+      const r = await m.query(sql, params);
+      await m.query("commit");
+      return r.rows;
+    } catch (e) {
+      await m.query("rollback");
+      throw e;
+    }
+  };
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 012
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'vieja13@test.dev', '{\"full_name\":\"Vieja Trece\"}'), (gen_random_uuid(), 'nueva13@test.dev', '{\"full_name\":\"Nueva Trece\"}')");
+    const [vieja, nueva] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    await m.query("update public.profiles set onboarding_completed = true, age = 30 where id in ($1, $2)", [vieja, nueva]);
+    assert.equal((await m.query("select count(*)::int n from information_schema.columns where table_name = 'user_private' and column_name = 'gender'")).rows[0].n, 0, "antes de la 013 no existe user_private.gender");
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('people_i_may_meet', '_seek_ok')")).rows[0].n, 2);
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('recommend_people', 'complete_onboarding')")).rows[0].n, 2, "una sola definición de cada una");
+    assert.equal((await m.query("select onboarding_completed from public.profiles where id = $1", [vieja])).rows[0].onboarding_completed, true, "quien ya estaba inscrita lo sigue estando");
+    // Quien ya estaba inscrita (sin datos) sigue apareciendo para quien no tiene preferencia
+    assert.deepEqual((await como13(nueva, "select public.people_i_may_meet() id")).map((r) => r.id), [vieja]);
+    assert.equal((await como13(nueva, "select count(*)::int n from public.recommend_people(null, null, null, null, 10, 0)"))[0].n, 1);
+    // …y desaparece para quien busca algo concreto hasta que indique su género
+    await como13(nueva, "update public.user_private set gender = 'mujer', interested_in = 'hombres' where user_id = $1", [nueva]);
+    assert.equal((await como13(nueva, "select count(*)::int n from public.recommend_people(null, null, null, null, 10, 0)"))[0].n, 0);
+    await como13(vieja, "update public.user_private set gender = 'hombre' where user_id = $1", [vieja]);
+    assert.equal((await como13(nueva, "select count(*)::int n from public.recommend_people(null, null, null, null, 10, 0)"))[0].n, 1);
+  } finally {
+    await m.end();
+  }
+});
+
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);
 await su.end();
 await server.stop();

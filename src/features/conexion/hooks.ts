@@ -137,6 +137,27 @@ export function useAfinidades() {
   return mapa;
 }
 
+/**
+ * Ids de las personas que encajan contigo en los DOS sentidos (tú quieres conocerlas y ellas te quieren conocer a ti), según el género y la
+ * preferencia que cada quien indicó al inscribirse. El servidor solo devuelve ids: el género de nadie se revela. null = todavía no se sabe
+ * (sin sesión o sin conexión): en ese caso no se filtra nada.
+ */
+export function useCompatibles(): Set<string> | null {
+  const { sesion, hidratado } = useSocial();
+  const [ids, setIds] = useState<Set<string> | null>(null);
+  useEffect(() => {
+    if (!hidratado || !sesion.uid || !haySupabase) return;
+    let vivo = true;
+    void Promise.resolve(supabase().rpc("people_i_may_meet")).then(({ data, error }) => {
+      if (vivo && !error && Array.isArray(data)) setIds(new Set(data as string[]));
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [hidratado, sesion.uid]);
+  return ids;
+}
+
 /** Lo que hay esperándote (likes sin responder, gente nueva). */
 export function useOportunidad() {
   const { sesion, hidratado } = useSocial();

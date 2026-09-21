@@ -8,7 +8,8 @@ import { sincronizarFotos } from "@/features/fotos/sincronizar";
 import { BORRADOR_VACIO, MIN_PAREJA_IDEAL, PASOS, edadDesde, estaturaCm, normalizarUsuario, validarBasico, validarFotos, validarIntereses, validarPareja } from "@/features/onboarding/validacion";
 import { bienvenidaNueva, frasesPruebaSocial, itemsOportunidad, saludoRecurrente } from "@/lib/mensajes";
 import { REFLEXIONES, TRADICIONES, ordenDeLaRonda, reflexionDelDia, semillaDePersona, numeroDeDia } from "@/lib/reflexiones";
-import { CIUDADES, CUENCA, PAISES, PAIS_POR_CODIGO, ciudadMasCercana, coordenadasValidas, distanciaKm, etiquetaUbicacion, leerUbicacion, paisDeZona, redondearCoordenada, textoDistancia, ubicacionDesdeGps, ubicacionManual, ubicacionPorZona, zonaValida } from "@/lib/geo";
+import { BUSCAS, GENEROS, bienvenida, concordar, encaja, esBusca, esGenero, seQuierenConocer } from "@/lib/genero";
+import { CIUDADES, CODIGOS_HISPANOS, CUENCA, esPaisHispano, PAISES, PAIS_POR_CODIGO, ciudadMasCercana, coordenadasValidas, distanciaKm, etiquetaUbicacion, leerUbicacion, paisDeZona, redondearCoordenada, textoDistancia, ubicacionDesdeGps, ubicacionManual, ubicacionPorZona, zonaValida } from "@/lib/geo";
 import { SALUDO, TEMA_SEMANA, claveDiaLocal, efemerides, enesimoDomingo, faseLunar, fechaLarga, fechaLocal, fraseDeEntrada, horaTexto, momentoDelDia, pascua, proximaEfemeride, pulsoDelDia, solDelDia } from "@/lib/dia";
 import { MINIMOS, completitudPerfil, datosCompletitud } from "@/lib/completitud";
 import { MAX_VALORES, VALORES } from "@/data/catalogos";
@@ -37,7 +38,7 @@ const test = async (nombre, fn) => {
   }
 };
 
-const FORMACION = { universidad: "Universidad Central", colegio: "Colegio Norte" };
+const FORMACION = { universidad: "Universidad Central", colegio: "Colegio Norte", genero: "mujer" };
 const json = (status, cuerpo) => new Response(JSON.stringify(cuerpo), { status, headers: { "Content-Type": "application/json" } });
 const guardada = (id) => ({ key: id, tipo: "guardada", id, url: `/u/${id}.webp`, thumbUrl: `/u/${id}_t.webp` });
 const nueva = (key, nombre = `${key}.jpg`) => ({ key, tipo: "nueva", file: new File([new Uint8Array([1, 2, 3])], nombre, { type: "image/jpeg" }), preview: `blob:${key}` });
@@ -129,7 +130,7 @@ await test("normalizarUsuario: sin acentos, @ ni caracteres raros, máx. 40", ()
 });
 await test("validarBasico: nombre, usuario y mayoría de edad", () => {
   const hoy = new Date(2026, 8, 19);
-  assert.deepEqual(Object.keys(validarBasico(BORRADOR_VACIO, hoy)).sort(), ["colegio", "nacimiento", "nombre", "universidad", "usuario"]);
+  assert.deepEqual(Object.keys(validarBasico(BORRADOR_VACIO, hoy)).sort(), ["colegio", "genero", "nacimiento", "nombre", "universidad", "usuario"]);
   assert.deepEqual(validarBasico({ ...BORRADOR_VACIO, ...FORMACION, nombre: "Ana Ruiz", nacimiento: "1990-01-01" }, hoy), {}); // el usuario se deriva del nombre
   assert.match(validarBasico({ ...BORRADOR_VACIO, ...FORMACION, nombre: "Ana", nacimiento: "2010-01-01" }, hoy).nacimiento, /18 años/);
   assert.match(validarBasico({ ...BORRADOR_VACIO, ...FORMACION, nombre: "Ana", nacimiento: "1900-01-01" }, hoy).nacimiento, /no es válida/);
@@ -138,11 +139,70 @@ await test("validarBasico: nombre, usuario y mayoría de edad", () => {
 await test("validarIntereses y validarFotos: mínimos y máximo de 10", () => {
   assert.deepEqual(Object.keys(validarIntereses(BORRADOR_VACIO)).sort(), ["intereses", "zonas"]);
   assert.deepEqual(validarIntereses({ ...BORRADOR_VACIO, intereses: ["roomie"], zonas: ["Centro"] }), {});
+  // Fuera de Ecuador las zonas (que son de Cuenca) son opcionales: quien viene de Europa no tiene que elegir barrios de otra ciudad
+  assert.deepEqual(validarIntereses({ ...BORRADOR_VACIO, pais: "ES", intereses: ["amigos"], zonas: [] }), {});
+  assert.deepEqual(Object.keys(validarIntereses({ ...BORRADOR_VACIO, pais: "ES" })), ["intereses"]);
   assert.ok(validarFotos(BORRADOR_VACIO).fotos);
   const fotos = (n) => Array.from({ length: n }, (_, i) => guardada(`f${i}`));
   assert.deepEqual(validarFotos({ ...BORRADOR_VACIO, fotos: fotos(1) }), {});
   assert.deepEqual(validarFotos({ ...BORRADOR_VACIO, fotos: fotos(10) }), {});
   assert.match(validarFotos({ ...BORRADOR_VACIO, fotos: fotos(11) }).fotos, /Máximo 10/);
+});
+await test("inscripción: se pregunta a todas las personas si son hombre o mujer (o prefieren no decirlo) y a quién quieren conocer", () => {
+  const hoy = new Date(2026, 8, 19);
+  const base = { ...BORRADOR_VACIO, universidad: "Universidad", colegio: "Colegio", nombre: "Ana", nacimiento: "1990-01-01" };
+  assert.match(validarBasico({ ...base, genero: "" }, hoy).genero, /hombre o mujer/i);
+  for (const g of ["hombre", "mujer", "no_dice"]) assert.deepEqual(validarBasico({ ...base, genero: g }, hoy), {}, g);
+  assert.ok(validarBasico({ ...base, genero: "otro" }, hoy).genero, "solo los valores del catálogo");
+  for (const b of ["hombres", "mujeres", "todos"]) assert.equal(validarPareja({ ...BORRADOR_VACIO, parejaIdeal: "x".repeat(20), quiereConocer: b }).quiereConocer, undefined, b);
+  assert.ok(validarPareja({ ...BORRADOR_VACIO, parejaIdeal: "x".repeat(20), quiereConocer: "nadie" }).quiereConocer);
+  assert.equal(BORRADOR_VACIO.genero, "");
+  assert.equal(BORRADOR_VACIO.quiereConocer, "", "no se elige nada por defecto: cada persona responde");
+});
+await test("género: catálogo, encaje en los dos sentidos (igual que _seek_ok en SQL) y concordancia sin adivinar por el nombre", () => {
+  assert.deepEqual(GENEROS.map((g) => g.id), ["mujer", "hombre", "no_dice"]);
+  assert.deepEqual(BUSCAS.map((b) => b.id), ["mujeres", "hombres", "todos"]);
+  assert.ok(esGenero("hombre") && esGenero("no_dice") && !esGenero("x") && !esGenero(null) && esBusca("todos") && !esBusca("hombre"));
+  // encaja(busca, género de la otra persona): sin preferencia encaja cualquiera, también quien no dijo su género
+  assert.deepEqual([encaja("mujeres", "mujer"), encaja("mujeres", "hombre"), encaja("mujeres", "no_dice"), encaja("mujeres", null)], [true, false, false, false]);
+  assert.deepEqual([encaja("hombres", "hombre"), encaja("hombres", "mujer"), encaja("todos", "no_dice"), encaja(null, null), encaja(undefined, "mujer")], [true, false, true, true, true]);
+  // los dos sentidos
+  assert.ok(seQuierenConocer({ genero: "hombre", busca: "mujeres" }, { genero: "mujer", busca: "hombres" }));
+  assert.ok(seQuierenConocer({ genero: "hombre", busca: "hombres" }, { genero: "hombre", busca: "hombres" }));
+  assert.ok(seQuierenConocer({ genero: "mujer", busca: "mujeres" }, { genero: "mujer", busca: "todos" }));
+  assert.ok(!seQuierenConocer({ genero: "hombre", busca: "mujeres" }, { genero: "mujer", busca: "mujeres" }), "ella no quiere conocer hombres");
+  assert.ok(!seQuierenConocer({ genero: "hombre", busca: "mujeres" }, { genero: "hombre", busca: "todos" }), "él no busca hombres");
+  assert.ok(seQuierenConocer({ genero: "hombre" }, { genero: "mujer" }), "sin preferencias (personas anteriores a la actualización) nadie desaparece");
+  // concordancia
+  assert.deepEqual(["hombre", "mujer", "no_dice", null, undefined].map(bienvenida), ["Bienvenido", "Bienvenida", "Te damos la bienvenida", "Te damos la bienvenida", "Te damos la bienvenida"]);
+  assert.equal(concordar("mujer", { hombre: "listo", mujer: "lista", neutro: "a punto" }), "lista");
+  // La frase de entrada respeta el género y sigue teniendo el nombre
+  const dia = { anio: 2026, mes: 9, dia: 23, hora: 9 };
+  const frases = (g) => Array.from({ length: 12 }, (_, v) => fraseDeEntrada("Ana", dia, v, g));
+  assert.ok(frases("mujer").some((f) => f.includes("Bienvenida")) && frases("hombre").some((f) => f.includes("Bienvenido")));
+  assert.ok(!frases("mujer").some((f) => /Bienvenido|orgulloso|orgullosa u orgulloso/.test(f)), "a una mujer no se le habla en masculino");
+  assert.ok(!frases("hombre").some((f) => /Bienvenida|orgullosa/.test(f)), "a un hombre no se le habla en femenino");
+  assert.ok(!frases(null).some((f) => /Bienvenid[oa]\b|orgullos[oa]/.test(f)), "sin dato: fórmulas neutras");
+  assert.ok(frases(undefined).every((f) => f.includes("Ana")));
+});
+await test("países: todo el mundo hispanohablante está y sale primero; cualquier otra persona, por ejemplo de Europa, también puede inscribirse", () => {
+  const codigos = PAISES.map((p) => p.codigo);
+  // Los 21 países donde el español es lengua oficial
+  const HISPANOS = ["AR", "BO", "CL", "CO", "CR", "CU", "DO", "EC", "SV", "GQ", "GT", "HN", "MX", "NI", "PA", "PY", "PE", "PR", "ES", "UY", "VE"];
+  assert.deepEqual([...CODIGOS_HISPANOS].sort(), [...HISPANOS].sort());
+  for (const c of HISPANOS) assert.ok(codigos.includes(c) && esPaisHispano(c), c);
+  assert.deepEqual(codigos.slice(0, HISPANOS.length).sort(), [...HISPANOS].sort(), "los hispanohablantes van primero");
+  assert.equal(codigos[0], "EC", "Ecuador, el mercado de arranque, al frente");
+  const resto = PAISES.slice(HISPANOS.length).map((p) => p.nombre);
+  assert.deepEqual(resto, [...resto].sort((a, b) => a.localeCompare(b, "es")), "el resto, por orden alfabético");
+  for (const c of ["FR", "DE", "IT", "GB", "PT", "NL", "CH", "US", "BR", "JP", "AU"]) assert.ok(codigos.includes(c) && !esPaisHispano(c), c);
+  assert.ok(PAISES.length >= 40);
+  // Cada país tiene ciudad de referencia y se reconoce por su zona horaria
+  for (const p of PAISES) assert.ok(CIUDADES.some((c) => c.pais === p.codigo), `sin ciudades: ${p.codigo}`);
+  assert.deepEqual([paisDeZona("America/Havana"), paisDeZona("America/Managua"), paisDeZona("America/Puerto_Rico"), paisDeZona("Africa/Malabo"), paisDeZona("Europe/Amsterdam")], ["CU", "NI", "PR", "GQ", "NL"]);
+  assert.equal(ubicacionPorZona("Europe/Amsterdam").pais, "NL");
+  assert.equal(ubicacionManual("NI").ciudad, "Managua");
+  assert.equal(ubicacionDesdeGps(52.37, 4.9, "Europe/Amsterdam").ciudad, "Ámsterdam");
 });
 await test("los pasos están en el orden esperado y el último limita la bio a 300", () => {
   assert.deepEqual(PASOS.map((p) => p.id), ["basico", "intereses", "pareja", "fotos", "confirmar"]);
@@ -166,8 +226,9 @@ await test("formación obligatoria, estatura opcional en 120–230 cm (admite me
   assert.equal(estaturaCm("250"), null);
   assert.equal(estaturaCm(""), null);
   assert.ok(validarPareja(BORRADOR_VACIO).parejaIdeal);
+  assert.match(validarPareja(BORRADOR_VACIO).quiereConocer, /a quién/i, "hay que elegir a quién se quiere conocer");
   assert.ok(validarPareja({ ...BORRADOR_VACIO, parejaIdeal: "x".repeat(19) }).parejaIdeal);
-  assert.deepEqual(validarPareja({ ...BORRADOR_VACIO, parejaIdeal: "  " + "x".repeat(20) + "  " }), {});
+  assert.deepEqual(validarPareja({ ...BORRADOR_VACIO, quiereConocer: "todos", parejaIdeal: "  " + "x".repeat(20) + "  " }), {});
   assert.ok(validarPareja({ ...BORRADOR_VACIO, parejaIdeal: "x".repeat(1001) }).parejaIdeal);
 });
 
@@ -312,8 +373,8 @@ await test("geo: la ubicación se deduce de la zona horaria, del GPS o de la ele
   assert.equal(paisDeZona("America/Guayaquil"), "EC");
   assert.equal(paisDeZona("Pacific/Galapagos"), "EC");
   assert.equal(paisDeZona("Europe/Madrid"), "ES");
-  assert.equal(paisDeZona("Asia/Tokyo"), null);
-  assert.deepEqual(ubicacionPorZona("Asia/Tokyo"), CUENCA_, "país desconocido: Cuenca");
+  assert.equal(paisDeZona("Africa/Nairobi"), null);
+  assert.deepEqual(ubicacionPorZona("Africa/Nairobi"), CUENCA_, "país desconocido: Cuenca");
   const co = ubicacionPorZona("America/Bogota");
   assert.deepEqual([co.pais, co.ciudad, co.zona, co.fuente], ["CO", "Bogotá", "America/Bogota", "zona_horaria"]);
   const gps = ubicacionDesdeGps(-2.90123456, -79.00589123, "America/Guayaquil");

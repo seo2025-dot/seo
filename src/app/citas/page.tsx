@@ -7,7 +7,8 @@ import { AnimatePresence } from "framer-motion";
 import type { Signo, TipoRelacion, Usuario } from "@/types/social";
 import { ESTILOS_VIDA } from "@/data/catalogos";
 import { useSocial } from "@/context/SocialContext";
-import { useAfinidades } from "@/features/conexion/hooks";
+import AvisoGenero from "@/components/AvisoGenero";
+import { useAfinidades, useCompatibles } from "@/features/conexion/hooks";
 import { SIGNOS } from "@/lib/astrologia";
 import { rompehielosPersona } from "@/lib/rompehielos";
 import { compatibilidad, ETIQUETA_RELACION, primerNombre } from "@/lib/social";
@@ -31,6 +32,7 @@ export default function CitasPage() {
   const [modal, setModal] = useState<{ persona: Usuario; cid: string } | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
   const afinidades = useAfinidades();
+  const compatibles = useCompatibles();
 
   useEffect(() => {
     if (!aviso) return;
@@ -45,6 +47,9 @@ export default function CitasPage() {
           !estado.amigos.includes(u.id) &&
           !estado.vistasPersonas.includes(u.id) &&
           (u.relaciones?.length ?? 0) > 0 &&
+          // La preferencia de género aplica a las citas: en «Pareja» y en «Todas» (donde solo cuenta para quien busca pareja) se muestran
+          // únicamente las personas que encajan en los dos sentidos. Amistad, roomies y socios no se filtran.
+          (!compatibles || compatibles.has(u.id) || !(u.relaciones?.includes("pareja") && (relacion === "todas" || relacion === "pareja"))) &&
           (relacion === "todas" || u.relaciones?.includes(relacion)) &&
           (!signo || u.signo === signo) &&
           (!estilo || u.estilo?.includes(estilo)),
@@ -57,7 +62,7 @@ export default function CitasPage() {
         if (sb !== undefined) return 1;
         return compatibilidad(estado.yo, b).puntaje - compatibilidad(estado.yo, a).puntaje;
       }),
-    [usuarios, estado.amigos, estado.vistasPersonas, estado.yo, relacion, signo, estilo, afinidades],
+    [usuarios, estado.amigos, estado.vistasPersonas, estado.yo, relacion, signo, estilo, afinidades, compatibles],
   );
 
   const contexto: TipoRelacion = relacion === "todas" ? "pareja" : relacion;
@@ -98,6 +103,10 @@ export default function CitasPage() {
         <h1 className="text-3xl font-bold">Citas y conexiones</h1>
         <p className="mt-1 text-slate-500">Pareja, amistad, roomies o socios: encuentra a tu gente con afinidad astral incluida ✨</p>
       </header>
+
+      <div className="mx-auto max-w-2xl">
+        <AvisoGenero />
+      </div>
 
       <div className="mx-auto mb-6 max-w-2xl space-y-3">
         <div className="flex flex-wrap justify-center gap-2" role="group" aria-label="Tipo de relación">

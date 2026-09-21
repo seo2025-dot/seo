@@ -46,7 +46,49 @@ export const PAISES: Pais[] = [
   { codigo: "IT", nombre: "Italia", zona: "Europe/Rome", capital: "Roma", lat: 41.9028, lng: 12.4964, moneda: "EUR", zonas: ["Europe/Rome"] },
   { codigo: "DE", nombre: "Alemania", zona: "Europe/Berlin", capital: "Berlín", lat: 52.52, lng: 13.405, moneda: "EUR", zonas: ["Europe/Berlin"] },
   { codigo: "GB", nombre: "Reino Unido", zona: "Europe/London", capital: "Londres", lat: 51.5074, lng: -0.1278, moneda: "GBP", zonas: ["Europe/London"] },
+  // Mundo hispano que faltaba
+  { codigo: "CU", nombre: "Cuba", zona: "America/Havana", capital: "La Habana", lat: 23.1136, lng: -82.3666, moneda: "CUP", zonas: ["America/Havana"] },
+  { codigo: "NI", nombre: "Nicaragua", zona: "America/Managua", capital: "Managua", lat: 12.1364, lng: -86.2514, moneda: "NIO", zonas: ["America/Managua"] },
+  { codigo: "PR", nombre: "Puerto Rico", zona: "America/Puerto_Rico", capital: "San Juan", lat: 18.4655, lng: -66.1057, moneda: "USD", zonas: ["America/Puerto_Rico"] },
+  { codigo: "GQ", nombre: "Guinea Ecuatorial", zona: "Africa/Malabo", capital: "Malabo", lat: 3.75, lng: 8.7833, moneda: "XAF", zonas: ["Africa/Malabo"] },
+  // El resto del mundo: cualquier persona puede inscribirse (la plataforma sigue siendo en español)
+  { codigo: "NL", nombre: "Países Bajos", zona: "Europe/Amsterdam", capital: "Ámsterdam", lat: 52.3676, lng: 4.9041, moneda: "EUR", zonas: ["Europe/Amsterdam"] },
+  { codigo: "BE", nombre: "Bélgica", zona: "Europe/Brussels", capital: "Bruselas", lat: 50.8503, lng: 4.3517, moneda: "EUR", zonas: ["Europe/Brussels"] },
+  { codigo: "CH", nombre: "Suiza", zona: "Europe/Zurich", capital: "Berna", lat: 46.948, lng: 7.4474, moneda: "CHF", zonas: ["Europe/Zurich"] },
+  { codigo: "IE", nombre: "Irlanda", zona: "Europe/Dublin", capital: "Dublín", lat: 53.3498, lng: -6.2603, moneda: "EUR", zonas: ["Europe/Dublin"] },
+  { codigo: "AT", nombre: "Austria", zona: "Europe/Vienna", capital: "Viena", lat: 48.2082, lng: 16.3738, moneda: "EUR", zonas: ["Europe/Vienna"] },
+  { codigo: "SE", nombre: "Suecia", zona: "Europe/Stockholm", capital: "Estocolmo", lat: 59.3293, lng: 18.0686, moneda: "SEK", zonas: ["Europe/Stockholm"] },
+  { codigo: "NO", nombre: "Noruega", zona: "Europe/Oslo", capital: "Oslo", lat: 59.9139, lng: 10.7522, moneda: "NOK", zonas: ["Europe/Oslo"] },
+  { codigo: "DK", nombre: "Dinamarca", zona: "Europe/Copenhagen", capital: "Copenhague", lat: 55.6761, lng: 12.5683, moneda: "DKK", zonas: ["Europe/Copenhagen"] },
+  { codigo: "PL", nombre: "Polonia", zona: "Europe/Warsaw", capital: "Varsovia", lat: 52.2297, lng: 21.0122, moneda: "PLN", zonas: ["Europe/Warsaw"] },
+  { codigo: "GR", nombre: "Grecia", zona: "Europe/Athens", capital: "Atenas", lat: 37.9838, lng: 23.7275, moneda: "EUR", zonas: ["Europe/Athens"] },
+  { codigo: "AU", nombre: "Australia", zona: "Australia/Sydney", capital: "Canberra", lat: -35.2809, lng: 149.13, moneda: "AUD", zonas: ["Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane", "Australia/Perth", "Australia/Adelaide"] },
+  { codigo: "NZ", nombre: "Nueva Zelanda", zona: "Pacific/Auckland", capital: "Wellington", lat: -41.2866, lng: 174.7756, moneda: "NZD", zonas: ["Pacific/Auckland"] },
+  { codigo: "JP", nombre: "Japón", zona: "Asia/Tokyo", capital: "Tokio", lat: 35.6762, lng: 139.6503, moneda: "JPY", zonas: ["Asia/Tokyo"] },
+  { codigo: "KR", nombre: "Corea del Sur", zona: "Asia/Seoul", capital: "Seúl", lat: 37.5665, lng: 126.978, moneda: "KRW", zonas: ["Asia/Seoul"] },
+  { codigo: "CN", nombre: "China", zona: "Asia/Shanghai", capital: "Pekín", lat: 39.9042, lng: 116.4074, moneda: "CNY", zonas: ["Asia/Shanghai"] },
+  { codigo: "IN", nombre: "India", zona: "Asia/Kolkata", capital: "Nueva Delhi", lat: 28.6139, lng: 77.209, moneda: "INR", zonas: ["Asia/Kolkata", "Asia/Calcutta"] },
+  { codigo: "AE", nombre: "Emiratos Árabes Unidos", zona: "Asia/Dubai", capital: "Abu Dabi", lat: 24.4539, lng: 54.3773, moneda: "AED", zonas: ["Asia/Dubai"] },
+  { codigo: "IL", nombre: "Israel", zona: "Asia/Jerusalem", capital: "Jerusalén", lat: 31.7683, lng: 35.2137, moneda: "ILS", zonas: ["Asia/Jerusalem"] },
+  { codigo: "MA", nombre: "Marruecos", zona: "Africa/Casablanca", capital: "Rabat", lat: 34.0209, lng: -6.8416, moneda: "MAD", zonas: ["Africa/Casablanca"] },
+  { codigo: "ZA", nombre: "Sudáfrica", zona: "Africa/Johannesburg", capital: "Pretoria", lat: -25.7479, lng: 28.2293, moneda: "ZAR", zonas: ["Africa/Johannesburg"] },
 ];
+
+/**
+ * Países donde el español es lengua oficial: son el mercado principal de la plataforma (viralización) y salen primero en los selectores.
+ * Cualquier otra persona, por ejemplo de Europa, también puede inscribirse y elegir su país.
+ */
+export const CODIGOS_HISPANOS = ["EC", "CO", "PE", "MX", "AR", "CL", "BO", "UY", "PY", "VE", "PA", "CR", "GT", "SV", "HN", "DO", "CU", "NI", "PR", "GQ", "ES"] as const;
+export const esPaisHispano = (codigo: string) => (CODIGOS_HISPANOS as readonly string[]).includes(codigo);
+
+// Orden para los selectores: primero el mundo hispano (Ecuador al frente) y luego el resto, cada bloque por orden alfabético.
+PAISES.sort((a, b) => {
+  const ha = esPaisHispano(a.codigo);
+  const hb = esPaisHispano(b.codigo);
+  if (ha !== hb) return ha ? -1 : 1;
+  if (a.codigo === "EC" || b.codigo === "EC") return a.codigo === "EC" ? -1 : 1;
+  return a.nombre.localeCompare(b.nombre, "es");
+});
 
 export const PAIS_POR_CODIGO: Record<string, Pais> = Object.fromEntries(PAISES.map((p) => [p.codigo, p]));
 
@@ -91,6 +133,49 @@ export const CIUDADES: Ciudad[] = [
   { nombre: "Londres", pais: "GB", lat: 51.5074, lng: -0.1278 },
   { nombre: "París", pais: "FR", lat: 48.8566, lng: 2.3522 },
   { nombre: "Roma", pais: "IT", lat: 41.9028, lng: 12.4964 },
+  { nombre: "Caracas", pais: "VE", lat: 10.4806, lng: -66.9036 },
+  { nombre: "Maracaibo", pais: "VE", lat: 10.6427, lng: -71.6125 },
+  { nombre: "La Paz", pais: "BO", lat: -16.4897, lng: -68.1193 },
+  { nombre: "Santa Cruz de la Sierra", pais: "BO", lat: -17.7833, lng: -63.1821 },
+  { nombre: "Montevideo", pais: "UY", lat: -34.9011, lng: -56.1645 },
+  { nombre: "Asunción", pais: "PY", lat: -25.2637, lng: -57.5759 },
+  { nombre: "San José", pais: "CR", lat: 9.9281, lng: -84.0907 },
+  { nombre: "Ciudad de Guatemala", pais: "GT", lat: 14.6349, lng: -90.5069 },
+  { nombre: "San Salvador", pais: "SV", lat: 13.6929, lng: -89.2182 },
+  { nombre: "Tegucigalpa", pais: "HN", lat: 14.0723, lng: -87.1921 },
+  { nombre: "Managua", pais: "NI", lat: 12.1364, lng: -86.2514 },
+  { nombre: "La Habana", pais: "CU", lat: 23.1136, lng: -82.3666 },
+  { nombre: "Santo Domingo", pais: "DO", lat: 18.4861, lng: -69.9312 },
+  { nombre: "San Juan", pais: "PR", lat: 18.4655, lng: -66.1057 },
+  { nombre: "Malabo", pais: "GQ", lat: 3.75, lng: 8.7833 },
+  { nombre: "Monterrey", pais: "MX", lat: 25.6866, lng: -100.3161 },
+  { nombre: "Córdoba", pais: "AR", lat: -31.4201, lng: -64.1888 },
+  { nombre: "Valparaíso", pais: "CL", lat: -33.0472, lng: -71.6127 },
+  { nombre: "Sevilla", pais: "ES", lat: 37.3891, lng: -5.9845 },
+  { nombre: "Valencia", pais: "ES", lat: 39.4699, lng: -0.3763 },
+  { nombre: "Lisboa", pais: "PT", lat: 38.7223, lng: -9.1393 },
+  { nombre: "Berlín", pais: "DE", lat: 52.52, lng: 13.405 },
+  { nombre: "Ámsterdam", pais: "NL", lat: 52.3676, lng: 4.9041 },
+  { nombre: "Bruselas", pais: "BE", lat: 50.8503, lng: 4.3517 },
+  { nombre: "Zúrich", pais: "CH", lat: 47.3769, lng: 8.5417 },
+  { nombre: "Dublín", pais: "IE", lat: 53.3498, lng: -6.2603 },
+  { nombre: "Viena", pais: "AT", lat: 48.2082, lng: 16.3738 },
+  { nombre: "Estocolmo", pais: "SE", lat: 59.3293, lng: 18.0686 },
+  { nombre: "Oslo", pais: "NO", lat: 59.9139, lng: 10.7522 },
+  { nombre: "Copenhague", pais: "DK", lat: 55.6761, lng: 12.5683 },
+  { nombre: "Varsovia", pais: "PL", lat: 52.2297, lng: 21.0122 },
+  { nombre: "Atenas", pais: "GR", lat: 37.9838, lng: 23.7275 },
+  { nombre: "Toronto", pais: "CA", lat: 43.6532, lng: -79.3832 },
+  { nombre: "Sídney", pais: "AU", lat: -33.8688, lng: 151.2093 },
+  { nombre: "Wellington", pais: "NZ", lat: -41.2866, lng: 174.7756 },
+  { nombre: "Tokio", pais: "JP", lat: 35.6762, lng: 139.6503 },
+  { nombre: "Seúl", pais: "KR", lat: 37.5665, lng: 126.978 },
+  { nombre: "Pekín", pais: "CN", lat: 39.9042, lng: 116.4074 },
+  { nombre: "Nueva Delhi", pais: "IN", lat: 28.6139, lng: 77.209 },
+  { nombre: "Dubái", pais: "AE", lat: 25.2048, lng: 55.2708 },
+  { nombre: "Jerusalén", pais: "IL", lat: 31.7683, lng: 35.2137 },
+  { nombre: "Casablanca", pais: "MA", lat: 33.5731, lng: -7.5898 },
+  { nombre: "Johannesburgo", pais: "ZA", lat: -26.2041, lng: 28.0473 },
 ];
 
 // ── Ubicación de una persona ────────────────────────────────────────────────

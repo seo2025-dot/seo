@@ -4,6 +4,10 @@
 > (**$0.50 · $1.50 · $3.50**), retos para ganar monedas sin pagar y todo el flujo de pago con PayPhone y PayPal. Lo único que falta para cobrar
 > de verdad son **las credenciales de cada pasarela** (ver §6). Sin ellas la tienda muestra «Próximamente» en esa pasarela y nada se rompe.
 
+> **Pagos por país.** PayPhone solo opera en Ecuador: la tienda lo ofrece a quien está en Ecuador (o no ha indicado país) y `/api/pagos/crear`
+> lo rechaza a quien tiene otro país en su perfil. En el resto del mundo (España, Colombia, México, Europa…) se paga con **PayPal**, que acepta tarjetas
+> internacionales (`pasarelasParaPais` en `src/lib/monedas.ts`). Los precios siguen en dólares.
+
 ## 1. La idea
 
 Todas las personas y negocios tienen sus **primeros 3 usos gratis** de cada acción. Desde el cuarto se pagan con monedas, que se **compran**

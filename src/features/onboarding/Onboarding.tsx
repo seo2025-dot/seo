@@ -5,7 +5,9 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { ESTILOS_VIDA, MAX_VALORES, VALORES, ZONAS } from "@/data/catalogos";
 import Chips from "@/components/Chips";
+import EleccionUnica from "@/components/EleccionUnica";
 import { useSocial } from "@/context/SocialContext";
+import { guardarEnPerfil, guardarUbicacion, obtenerUbicacion } from "@/features/geo/ubicacion";
 import GaleriaFotos from "@/features/fotos/GaleriaFotos";
 import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
 import { sincronizarFotos } from "@/features/fotos/sincronizar";
@@ -13,6 +15,8 @@ import type { ItemFoto } from "@/features/fotos/tipos";
 import { BORRADOR_VACIO, edadDesde, estaturaCm, MAX_PAREJA_IDEAL, MIN_PAREJA_IDEAL, normalizarUsuario, PASOS, type Borrador, type Errores } from "@/features/onboarding/validacion";
 import { MARCA_BIENVENIDA } from "@/components/BienvenidaModal";
 import { signoDeFecha } from "@/lib/astrologia";
+import { BUSCAS, GENEROS } from "@/lib/genero";
+import { PAISES, ubicacionManual } from "@/lib/geo";
 import { ETIQUETA_INTERES, ETIQUETA_RELACION, INTERESES_EDITABLES } from "@/lib/social";
 import type { Interes, TipoRelacion } from "@/types/social";
 
@@ -61,6 +65,9 @@ export default function Onboarding() {
       usuario: y.usuario.replace(/^@/, ""),
       nacimiento: y.nacimiento ?? "",
       ubicacion: y.ubicacion,
+      pais: prev.pais !== "EC" ? prev.pais : obtenerUbicacion().pais,
+      genero: y.genero ?? "",
+      quiereConocer: y.quiereConocer ?? "",
       universidad: y.universidad ?? "",
       colegio: y.colegio ?? "",
       estatura: y.estatura ? String(y.estatura) : "",
@@ -131,6 +138,8 @@ export default function Onboarding() {
       usuario: `@${normalizarUsuario(b.usuario || b.nombre)}`,
       bio: b.bio.trim() || undefined,
       ubicacion: b.ubicacion.trim(),
+      genero: b.genero || undefined,
+      quiereConocer: b.quiereConocer || undefined,
       universidad: b.universidad.trim(),
       colegio: b.colegio.trim(),
       estatura: estaturaCm(b.estatura) ?? undefined,
@@ -149,6 +158,13 @@ export default function Onboarding() {
     if (!guardado) {
       setEnviando(false);
       return;
+    }
+
+    // El país y la ciudad que eligió pasan a ser su ubicación (aproximada y privada); si falla no se detiene la inscripción.
+    const lugar = ubicacionManual(b.pais, b.ubicacion.trim());
+    if (lugar) {
+      guardarUbicacion(lugar);
+      void guardarEnPerfil(lugar);
     }
 
     const r = await sincronizarFotos(b.fotos, enServidor, (hecho, total) => setProgreso({ hecho, total }));
@@ -232,6 +248,24 @@ export default function Onboarding() {
               <input id="ob-nac" type="date" value={b.nacimiento} onChange={(e) => actualizar("nacimiento", e.target.value)} max={new Date().toISOString().slice(0, 10)} aria-invalid={!!errores.nacimiento} className={campo} />
               {edad !== null && edad >= 18 && signo && <p className="mt-1 text-xs text-slate-500">{edad} años · signo {signo}</p>}
             </Campo>
+            <EleccionUnica
+              leyenda="Eres"
+              nombre="ob-genero"
+              opciones={GENEROS}
+              valor={b.genero}
+              onChange={(v) => actualizar("genero", v)}
+              error={errores.genero}
+              ayuda="Es privado: nadie lo ve. Lo usamos para mostrarte a las personas indicadas y hablarte como corresponde."
+            />
+            <Campo id="ob-pais" label="País donde vives">
+              <select id="ob-pais" value={b.pais} onChange={(e) => actualizar("pais", e.target.value)} autoComplete="country-name" className={campo}>
+                {PAISES.map((p) => (
+                  <option key={p.codigo} value={p.codigo}>
+                    {p.nombre}
+                  </option>
+                ))}
+              </select>
+            </Campo>
             <Campo id="ob-ubi" label="Ciudad o barrio (opcional)">
               <input id="ob-ubi" value={b.ubicacion} onChange={(e) => actualizar("ubicacion", e.target.value)} maxLength={60} className={campo} />
             </Campo>
@@ -257,11 +291,15 @@ export default function Onboarding() {
               <Chips<Interes> opciones={INTERESES_EDITABLES} valor={b.intereses} onChange={(v) => actualizar("intereses", v)} etiqueta={(o) => ETIQUETA_INTERES[o]} color="border-brand-600 bg-brand-600 text-white" />
               {errores.intereses && <p role="alert" className="mt-1 text-xs text-rose-600">{errores.intereses}</p>}
             </fieldset>
+            {b.pais === "EC" ? (
             <fieldset>
               <legend className="mb-2 text-sm font-medium">Zonas que te interesan</legend>
               <Chips<string> opciones={ZONAS} valor={b.zonas} onChange={(v) => actualizar("zonas", v)} etiqueta={(o) => `📍 ${o}`} color="border-emerald-600 bg-emerald-600 text-white" />
               {errores.zonas && <p role="alert" className="mt-1 text-xs text-rose-600">{errores.zonas}</p>}
             </fieldset>
+            ) : (
+              <p className="rounded-xl bg-slate-50 p-3 text-xs text-slate-600">Las zonas por ciudad de tu país llegarán pronto: por ahora no necesitas elegirlas.</p>
+            )}
             <fieldset>
               <legend className="mb-2 text-sm font-medium">Estilo de vida (opcional)</legend>
               <Chips<string> opciones={ESTILOS_VIDA} valor={b.estilo} onChange={(v) => actualizar("estilo", v)} etiqueta={(o) => o} color="border-fuchsia-600 bg-fuchsia-600 text-white" />
@@ -271,6 +309,15 @@ export default function Onboarding() {
 
         {paso === 2 && (
           <>
+            <EleccionUnica
+              leyenda="¿A quién te gustaría conocer?"
+              nombre="ob-busca"
+              opciones={BUSCAS}
+              valor={b.quiereConocer}
+              onChange={(v) => actualizar("quiereConocer", v)}
+              error={errores.quiereConocer}
+              ayuda="Es privado. Solo te recomendamos a personas que también quieran conocerte."
+            />
             <Campo id="ob-pareja" label={`Describe a tu pareja ideal — ${b.parejaIdeal.trim().length}/${MAX_PAREJA_IDEAL}`} error={errores.parejaIdeal}>
               <textarea
                 id="ob-pareja"

@@ -1,4 +1,5 @@
 import { signoDeFecha, infoSigno } from "@/lib/astrologia";
+import { bienvenida, concordar, type Genero } from "@/lib/genero";
 import { CUENCA, desfaseMinutos, PAIS_POR_CODIGO, type Ubicacion } from "@/lib/geo";
 
 /**
@@ -258,11 +259,12 @@ export const TEMA_SEMANA: { texto: string; accion: { texto: string; href: string
   { texto: "Sábado de disfrute: sal a tu ciudad, comparte y descubre algo nuevo.", accion: { texto: "Mira la cartelera", href: "/directorio/eventos" } },
 ];
 
-const FRASES: Record<Momento, ((n: string) => string)[]> = {
+const FRASES: Record<Momento, ((n: string, g?: Genero | null) => string)[]> = {
   manana: [
     (n) => `${n}, la ciudad ya despertó: ¿qué vas a descubrir hoy?`,
     (n) => `Un buen día empieza con una buena intención, ${n}. ¿Cuál es la tuya?`,
-    (n) => `${n}, hoy es una página en blanco. Escribe algo de lo que te sientas orgullosa u orgulloso.`,
+    (n, g) => `${n}, hoy es una página en blanco. Escribe algo ${concordar(g, { hombre: "de lo que te sientas orgulloso", mujer: "de lo que te sientas orgullosa", neutro: "que te llene de orgullo" })}.`,
+    (n, g) => `${bienvenida(g)} a un día nuevo, ${n}: hay gente por conocer y cosas por hacer.`,
     (n) => `Con calma y con ganas, ${n}: el día es largo y hay mucho por hacer bien.`,
     (n) => `${n}, empieza por lo pequeño: lo grande llega solo.`,
     (n) => `Hay gente esperando conocer a alguien como tú, ${n}. Sal a buscarla.`,
@@ -278,6 +280,7 @@ const FRASES: Record<Momento, ((n: string) => string)[]> = {
     (n) => `Todavía queda tarde por delante, ${n}: aprovéchala con intención.`,
     (n) => `${n}, si algo se complicó, respira: aún hay tiempo de enderezar el día.`,
     (n) => `Buen momento para descubrir algo nuevo cerca de ti, ${n}.`,
+    (n, g) => `${bienvenida(g)} de vuelta, ${n}: la tarde es buena para conversar con alguien.`,
   ],
   atardecer: [
     (n) => `${n}, el día baja el ritmo. Mira lo que hiciste bien hoy.`,
@@ -286,6 +289,7 @@ const FRASES: Record<Momento, ((n: string) => string)[]> = {
     (n) => `A esta hora se conversa mejor, ${n}. ¿Con quién te apetece hablar?`,
     (n) => `${n}, si tuviste un día pesado, esta hora es para soltar.`,
     (n) => `La luz cambia y el ánimo también, ${n}. Aprovecha para salir un rato.`,
+    (n, g) => `${bienvenida(g)} al atardecer, ${n}: cuéntale a alguien cómo te fue hoy.`,
   ],
   noche: [
     (n) => `${n}, el día ya casi termina: quédate con lo bueno.`,
@@ -294,6 +298,7 @@ const FRASES: Record<Momento, ((n: string) => string)[]> = {
     (n) => `Las mejores conversaciones a veces llegan de noche, ${n}.`,
     (n) => `${n}, deja el celular un rato antes de dormir: tu mente lo agradecerá.`,
     (n) => `Cierra el día con calma, ${n}: hiciste lo que pudiste y eso cuenta.`,
+    (n, g) => `${bienvenida(g)} a esta hora tranquila, ${n}: aquí siempre hay alguien con quien hablar.`,
   ],
 };
 
@@ -307,9 +312,9 @@ function hash(texto: string): number {
  * Frase de entrada: depende del momento del día, de la fecha y de cuántas veces ha entrado hoy la persona (`visita`), así que no es
  * la misma dos días seguidos ni dos visitas seguidas.
  */
-export function fraseDeEntrada(nombre: string, f: Pick<FechaLocal, "anio" | "mes" | "dia" | "hora">, visita = 0): string {
+export function fraseDeEntrada(nombre: string, f: Pick<FechaLocal, "anio" | "mes" | "dia" | "hora">, visita = 0, genero?: Genero | null): string {
   const lista = FRASES[momentoDelDia(f.hora)];
-  return lista[(hash(claveDiaLocal(f)) + visita) % lista.length](nombre);
+  return lista[(hash(claveDiaLocal(f)) + visita) % lista.length](nombre, genero);
 }
 
 // ── Todo junto ──────────────────────────────────────────────────────────────

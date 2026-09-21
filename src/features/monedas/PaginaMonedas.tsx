@@ -4,8 +4,9 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSocial } from "@/context/SocialContext";
 import { RetosComunidad } from "@/features/monedas/Piezas";
+import { useUbicacion } from "@/features/geo/ubicacion";
 import { usePrecios, useTienda, useUsos } from "@/features/monedas/hooks";
-import { BONO_PRIMERA_COMPRA_PCT, PASARELAS, ahorroFrente, bonoPrimeraCompra, dolares, estadoUso, textoCoste, textoMonedas, textoMovimiento, type PaqueteMonedas, type Pasarela } from "@/lib/monedas";
+import { BONO_PRIMERA_COMPRA_PCT, PASARELAS, ahorroFrente, bonoPrimeraCompra, dolares, estadoUso, pasarelasParaPais, textoCoste, textoMonedas, textoMovimiento, type PaqueteMonedas, type Pasarela } from "@/lib/monedas";
 import IconoMoneda from "@/components/IconoMoneda";
 
 const MENSAJES_ERROR: Record<string, string> = {
@@ -23,6 +24,8 @@ export default function PaginaMonedas() {
   const { paquetes, pasarelas, movimientos, primeraCompra } = useTienda();
   const precios = usePrecios();
   const { usos } = useUsos();
+  const { ubicacion } = useUbicacion();
+  const formasDePago = pasarelasParaPais(ubicacion.pais);
   const [pagando, setPagando] = useState<string | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
 
@@ -116,7 +119,7 @@ export default function PaginaMonedas() {
           Recargar monedas
         </h2>
         <p className="text-sm text-slate-600">
-          Pago seguro con PayPhone (Ecuador) o PayPal. Las monedas llegan a tu cuenta en cuanto se confirma el pago.
+          {formasDePago.includes("payphone") ? "Pago seguro con PayPhone (Ecuador) o PayPal." : "Pago seguro con PayPal (también con tarjeta internacional)."} Las monedas llegan a tu cuenta en cuanto se confirma el pago.
           {primeraCompra && <strong className="text-brand-700"> Tu primera recarga trae +{BONO_PRIMERA_COMPRA_PCT} % de monedas extra.</strong>}
         </p>
 
@@ -134,7 +137,7 @@ export default function PaginaMonedas() {
                 {extra > 0 && <p className="text-sm font-bold text-emerald-700">+{extra} de regalo → {p.monedas + extra} en total</p>}
                 {ahorro > 0 && <p className="text-xs text-slate-500">Cada moneda sale {ahorro} % más barata</p>}
                 <div className="mt-4 space-y-2">
-                  {(["payphone", "paypal", ...(pasarelas?.prueba ? (["prueba"] as const) : [])] as Pasarela[]).map((k) => {
+                  {([...formasDePago, ...(pasarelas?.prueba ? (["prueba"] as const) : [])] as Pasarela[]).map((k) => {
                     const disponible = pasarelas?.[k] ?? false;
                     return (
                       <button

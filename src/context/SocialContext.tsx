@@ -13,6 +13,7 @@ import type { RealtimeChannel } from "@supabase/supabase-js";
 import type { Propiedad } from "@/types/propiedad";
 import type { Anuncio, Demanda, Gig, Negocio, Notificacion, Vacante, Vehiculo } from "@/types/mercado";
 import type { Conversacion, Post, ReaccionId, Solicitud, TipoPost, Usuario } from "@/types/social";
+import type { Busca, Genero } from "@/lib/genero";
 import { negocioAAnuncio, propiedadAAnuncio, vehiculoAAnuncio } from "@/lib/anuncios";
 import { MISIONES } from "@/lib/recompensas";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
@@ -106,6 +107,8 @@ interface FilaPrivada {
   ideal_partner: string | null;
   ideal_values: string[] | null;
   ideal_lifestyle: string[] | null;
+  gender: Genero | null;
+  interested_in: Busca | null;
 }
 
 interface Crudo {
@@ -122,6 +125,8 @@ interface Crudo {
   parejaIdeal: string | null;
   parejaIdealValores: string[];
   parejaIdealEstilo: string[];
+  genero: Genero | null;
+  quiereConocer: Busca | null;
   swipesListing: { listing_id: string; action: "save" | "pass" }[];
   swipesPersona: { to_user: string }[];
   matches: { user_a: string; user_b: string }[];
@@ -135,12 +140,14 @@ interface Crudo {
   esAdmin: boolean;
 }
 
-const PRIVADO_VACIO: Pick<Crudo, "monedero" | "nacimiento" | "parejaIdeal" | "parejaIdealValores" | "parejaIdealEstilo" | "swipesListing" | "swipesPersona" | "matches" | "amistades" | "notificaciones" | "tarot" | "misiones" | "aplicaciones" | "chats" | "mensajes" | "esAdmin"> = {
+const PRIVADO_VACIO: Pick<Crudo, "monedero" | "nacimiento" | "parejaIdeal" | "parejaIdealValores" | "parejaIdealEstilo" | "genero" | "quiereConocer" | "swipesListing" | "swipesPersona" | "matches" | "amistades" | "notificaciones" | "tarot" | "misiones" | "aplicaciones" | "chats" | "mensajes" | "esAdmin"> = {
   monedero: null,
   nacimiento: null,
   parejaIdeal: null,
   parejaIdealValores: [],
   parejaIdealEstilo: [],
+  genero: null,
+  quiereConocer: null,
   swipesListing: [],
   swipesPersona: [],
   matches: [],
@@ -448,7 +455,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     if (!id) return;
     const [p, priv] = await Promise.all([
       supabase().from("profiles").select("*").eq("id", id).maybeSingle(),
-      supabase().from("user_private").select("birth_date, ideal_partner, ideal_values, ideal_lifestyle").eq("user_id", id).maybeSingle(),
+      supabase().from("user_private").select("birth_date, ideal_partner, ideal_values, ideal_lifestyle, gender, interested_in").eq("user_id", id).maybeSingle(),
     ]);
     const privado = priv.data as FilaPrivada | null;
     parche((prev) => ({
@@ -457,6 +464,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       parejaIdeal: privado?.ideal_partner ?? prev.parejaIdeal,
       parejaIdealValores: privado?.ideal_values ?? prev.parejaIdealValores,
       parejaIdealEstilo: privado?.ideal_lifestyle ?? prev.parejaIdealEstilo,
+      genero: privado?.gender ?? prev.genero,
+      quiereConocer: privado?.interested_in ?? prev.quiereConocer,
     }));
   }, [parche]);
 
@@ -464,7 +473,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     const sb = supabase();
     const [monedero, priv, swL, swP, mt, am, no, ta, mi, ap, ch, adm] = await Promise.all([
       sb.from("wallets").select("*").eq("user_id", id).maybeSingle(),
-      sb.from("user_private").select("birth_date, ideal_partner, ideal_values, ideal_lifestyle").eq("user_id", id).maybeSingle(),
+      sb.from("user_private").select("birth_date, ideal_partner, ideal_values, ideal_lifestyle, gender, interested_in").eq("user_id", id).maybeSingle(),
       sb.from("listing_swipes").select("listing_id, action").eq("user_id", id),
       sb.from("person_swipes").select("to_user").eq("from_user", id),
       sb.from("matches").select("user_a, user_b"),
@@ -482,6 +491,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       parejaIdeal: (priv.data as FilaPrivada | null)?.ideal_partner ?? null,
       parejaIdealValores: (priv.data as FilaPrivada | null)?.ideal_values ?? [],
       parejaIdealEstilo: (priv.data as FilaPrivada | null)?.ideal_lifestyle ?? [],
+      genero: (priv.data as FilaPrivada | null)?.gender ?? null,
+      quiereConocer: (priv.data as FilaPrivada | null)?.interested_in ?? null,
       swipesListing: (swL.data ?? []) as Crudo["swipesListing"],
       swipesPersona: (swP.data ?? []) as Crudo["swipesPersona"],
       matches: (mt.data ?? []) as Crudo["matches"],
@@ -650,8 +661,8 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
 
   const perfilesMapeados = useMemo(() => {
     const yo = uid;
-    return crudo.perfiles.map((p) => mapearPerfil(p, yo, p.id === yo ? { nacimiento: crudo.nacimiento, parejaIdeal: crudo.parejaIdeal, parejaIdealValores: crudo.parejaIdealValores, parejaIdealEstilo: crudo.parejaIdealEstilo } : undefined));
-  }, [crudo.perfiles, crudo.nacimiento, crudo.parejaIdeal, crudo.parejaIdealValores, crudo.parejaIdealEstilo, uid]);
+    return crudo.perfiles.map((p) => mapearPerfil(p, yo, p.id === yo ? { nacimiento: crudo.nacimiento, parejaIdeal: crudo.parejaIdeal, parejaIdealValores: crudo.parejaIdealValores, parejaIdealEstilo: crudo.parejaIdealEstilo, genero: crudo.genero, quiereConocer: crudo.quiereConocer } : undefined));
+  }, [crudo.perfiles, crudo.nacimiento, crudo.parejaIdeal, crudo.parejaIdealValores, crudo.parejaIdealEstilo, crudo.genero, crudo.quiereConocer, uid]);
 
   const yoUsuario = useMemo(() => perfilesMapeados.find((p) => p.id === "yo") ?? PERFIL_INVITADO, [perfilesMapeados]);
   const usuarios = useMemo(() => perfilesMapeados.filter((p) => p.id !== "yo"), [perfilesMapeados]);
@@ -1211,6 +1222,14 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
           const { error } = await supabase().from("user_private").update(ideal).eq("user_id", yo);
           if (error) throw error;
           parche((prev) => ({ parejaIdealValores: ideal.ideal_values ?? prev.parejaIdealValores, parejaIdealEstilo: ideal.ideal_lifestyle ?? prev.parejaIdealEstilo }));
+        }
+        if (c.genero !== undefined || c.quiereConocer !== undefined) {
+          const pref: { gender?: Genero; interested_in?: Busca } = {};
+          if (c.genero !== undefined) pref.gender = c.genero;
+          if (c.quiereConocer !== undefined) pref.interested_in = c.quiereConocer;
+          const { error } = await supabase().from("user_private").update(pref).eq("user_id", yo);
+          if (error) throw error;
+          parche((prev) => ({ genero: pref.gender ?? prev.genero, quiereConocer: pref.interested_in ?? prev.quiereConocer }));
         }
         return true;
       });

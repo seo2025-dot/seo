@@ -16,6 +16,8 @@ import AnuncioCard from "@/components/AnuncioCard";
 import PostCard from "@/components/PostCard";
 import BarraCompletitud from "@/components/BarraCompletitud";
 import Chips from "@/components/Chips";
+import EleccionUnica from "@/components/EleccionUnica";
+import { BUSCAS, GENEROS, type Busca, type Genero } from "@/lib/genero";
 import SeccionFotos from "@/features/fotos/SeccionFotos";
 import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
 import { estaturaCm, MAX_PAREJA_IDEAL, MIN_PAREJA_IDEAL } from "@/features/onboarding/validacion";
@@ -443,6 +445,8 @@ function EditarPerfil({ onCerrar, nFotos }: { onCerrar: () => void; nFotos: numb
   const [universidad, setUniversidad] = useState(yo.universidad ?? "");
   const [colegio, setColegio] = useState(yo.colegio ?? "");
   const [estatura, setEstatura] = useState(yo.estatura ? String(yo.estatura) : "");
+  const [genero, setGenero] = useState<Genero | "">(yo.genero ?? "");
+  const [quiereConocer, setQuiereConocer] = useState<Busca | "">(yo.quiereConocer ?? "");
   const [parejaIdeal, setParejaIdeal] = useState(yo.parejaIdeal ?? "");
   const [valores, setValores] = useState<string[]>(yo.valores ?? []);
   const [parejaValores, setParejaValores] = useState<string[]>(yo.parejaIdealValores ?? []);
@@ -533,6 +537,8 @@ function EditarPerfil({ onCerrar, nFotos }: { onCerrar: () => void; nFotos: numb
       universidad: universidad.trim(),
       colegio: colegio.trim(),
       estatura: estaturaCm(estatura) ?? undefined,
+      genero: genero || undefined,
+      quiereConocer: quiereConocer || undefined,
       parejaIdeal: parejaIdeal.trim(),
       valores,
       parejaIdealValores: parejaValores,
@@ -604,6 +610,12 @@ function EditarPerfil({ onCerrar, nFotos }: { onCerrar: () => void; nFotos: numb
           <label htmlFor="pf-presupuesto" className="mb-1 block text-sm font-medium">Presupuesto (opcional)</label>
           <input id="pf-presupuesto" value={presupuesto} onChange={(e) => setPresupuesto(e.target.value)} maxLength={40} placeholder="USD 400–600 / mes" className={campo} />
         </div>
+      </div>
+
+      <div className="grid gap-4 rounded-xl bg-slate-50 p-4 sm:grid-cols-2">
+        <EleccionUnica leyenda="Eres" nombre="pf-genero" opciones={GENEROS} valor={genero} onChange={setGenero} />
+        <EleccionUnica leyenda="¿A quién te gustaría conocer?" nombre="pf-busca" opciones={BUSCAS} valor={quiereConocer} onChange={setQuiereConocer} />
+        <p className="text-xs text-slate-500 sm:col-span-2">Privado: nadie lo ve. Solo te recomendamos a personas que también quieran conocerte.</p>
       </div>
 
       <div>

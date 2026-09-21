@@ -25,7 +25,7 @@ export default function PulsoDelDia() {
   if (!pulso) return <div className="mb-5 h-32 animate-pulse rounded-2xl bg-white/60 sm:h-24" aria-hidden />;
 
   const nombre = sesion.uid ? primerNombre(estado.yo.nombre) : "amiga o amigo";
-  const frase = fraseDeEntrada(nombre, pulso.fecha, visita);
+  const frase = fraseDeEntrada(nombre, pulso.fecha, visita, sesion.uid ? estado.yo.genero : null);
   const hoy = pulso.hoy[0];
 
   return (

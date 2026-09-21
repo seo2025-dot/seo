@@ -45,10 +45,26 @@ una vez, barajado con una semilla y entrelazado por tradición; no se repite nin
 persona parte de un desplazamiento propio (`semillaDePersona`), por lo que dos personas no ven lo mismo el mismo día. «Otra reflexión»
 adelanta la rotación. **Solo llevan `fuente` las pocas frases textuales comprobables**; el resto declara `idea` o se presenta como reflexión propia.
 
-## 5. Qué falta para internacionalizar del todo
+## 5. Países, género y pagos (actualización 013)
 
-- **Idioma**: la interfaz está en español; faltan traducciones (i18n) y formatos de fecha por idioma.
-- **Moneda local** y precios por país; **pasarelas** por país (hoy PayPhone —Ecuador— y PayPal).
-- **Efemérides y feriados** de otros países (hoy solo Ecuador tiene calendario propio; las conmemoraciones mundiales valen para todos).
+- **Países**: están los 21 donde el español es lengua oficial (primero en los selectores, Ecuador al frente) y 28 más (Europa, Américas, Asia,
+  África y Oceanía) para que cualquier persona pueda inscribirse. La plataforma sigue siendo solo en español.
+- **Al inscribirse se pregunta el género y a quién se quiere conocer** (`user_private.gender`: hombre · mujer · no_dice; `interested_in`: hombres ·
+  mujeres · todos). Son **privados**: nadie ve el género de otra persona. `complete_onboarding()` exige ambos. Sin elección por defecto: cada persona responde.
+- **Encaje en los dos sentidos** (`_seek_ok` en SQL, `encaja/seQuierenConocer` en TypeScript): `recommend_people` (/explorar) solo devuelve a quien
+  yo quiero conocer **y** me quiere conocer; `people_i_may_meet()` devuelve solo ids para filtrar la baraja de /citas (en «Pareja» y «Todas», donde
+  solo cuenta para quien busca pareja; amistad, roomies y socios no se filtran). Quien aún no indicó su preferencia ve a todos; quien busca algo
+  concreto solo ve a quien indicó ese género, por eso las personas ya inscritas ven un aviso (`AvisoGenero`) en /explorar y /citas.
+- **Adaptación de textos**: las frases de entrada concuerdan con el género (Bienvenido/Bienvenida; sin dato, «Te damos la bienvenida») y nunca se
+  adivina por el nombre.
+- **Fuera de Ecuador** el onboarding pide el país y no obliga a elegir zonas (el catálogo de barrios es de Cuenca).
+- **Pagos por país**: PayPhone solo en Ecuador (`pasarelasParaPais`); en el resto, PayPal. El servidor (`/api/pagos/crear`) rechaza PayPhone a quien
+  tiene otro país en su perfil.
+
+## 6. Qué falta
+
+- **Moneda local** y precios por país (hoy todo en dólares).
+- **Efemérides y feriados** de otros países hispanohablantes (hoy solo Ecuador tiene calendario propio; las conmemoraciones mundiales valen para todos).
 - **Mapa** y búsqueda por dirección (hoy: punto por GPS/ciudad de referencia).
-- Catálogo de zonas/barrios por ciudad (hoy fuera de Ecuador la zona es texto libre).
+- Catálogo de **zonas/barrios por ciudad** (hoy fuera de Ecuador la zona es texto libre).
+- Perfiles demo de `seed_personas.sql`: no tienen género, así que no salen para quien busca «hombres» o «mujeres».

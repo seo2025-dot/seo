@@ -9,8 +9,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import {
-  BONO_PRIMERA_COMPRA_PCT, PAQUETES_DEFECTO, PRECIOS_DEFECTO, ahorroFrente, bonoPrimeraCompra, costeMensaje, detalleSaldo, dolares, esMensajeDeMonedas, esSaldoInsuficiente, estadoUso, mensajeSaldoInsuficiente,
-  mensajesHastaCobro, textoCoste, textoMonedas, textoMovimiento,
+  BONO_PRIMERA_COMPRA_PCT, PAIS_PAYPHONE, PAQUETES_DEFECTO, PRECIOS_DEFECTO, ahorroFrente, bonoPrimeraCompra, costeMensaje, detalleSaldo, dolares, esMensajeDeMonedas, esSaldoInsuficiente, estadoUso, mensajeSaldoInsuficiente,
+  mensajesHastaCobro, pasarelasParaPais, textoCoste, textoMonedas, textoMovimiento,
 } from "@/lib/monedas";
 import { ORIGEN_MONEDAS, alturasBarras, dolaresACentavos, mensajeErrorAdmin, resumenEconomia, textoLog, validarAjuste, validarPaquete } from "@/lib/adminMonedas";
 import { mensajeErrorPedido } from "@/lib/directorio/pedidos";
@@ -429,6 +429,22 @@ await test("textoLog describe cada tipo de cambio con el antes y el después", (
   assert.equal(textoLog({ accion: "grant", detalle: { delta: 1, motivo: "hola" } }), "Regalo de 1 moneda: hola");
   assert.equal(textoLog({ accion: "price", detalle: { action: "x", antes: { cost: 1 }, despues: { cost: 1 } } }), "Tarifa «x»: sin cambios");
   assert.equal(textoLog({ accion: "otra", detalle: {} }), "otra");
+});
+await test("pasarelas por país: PayPhone solo en Ecuador; en cualquier otro país, PayPal", () => {
+  assert.equal(PAIS_PAYPHONE, "EC");
+  assert.deepEqual(pasarelasParaPais("EC"), ["payphone", "paypal"]);
+  for (const pais of ["CO", "PE", "MX", "AR", "ES", "FR", "DE", "US", "JP"]) assert.deepEqual(pasarelasParaPais(pais), ["paypal"], pais);
+  assert.deepEqual(pasarelasParaPais(null), ["payphone", "paypal"], "sin país conocido se ofrece lo del mercado de arranque");
+  assert.deepEqual(pasarelasParaPais(undefined), ["payphone", "paypal"]);
+  assert.ok(!pasarelasParaPais("ES").includes("payphone"));
+});
+await test("el servidor rechaza PayPhone a quien indicó otro país y el navegador solo ofrece lo que corresponde al país", () => {
+  const ruta = fs.readFileSync(path.join(process.cwd(), "src/app/api/pagos/crear/route.ts"), "utf8");
+  assert.match(ruta, /pasarelasParaPais\(pais\)\.includes\("payphone"\)/);
+  assert.match(ruta, /PayPhone solo está disponible en Ecuador/);
+  const pagina = fs.readFileSync(path.join(process.cwd(), "src/features/monedas/PaginaMonedas.tsx"), "utf8");
+  assert.match(pagina, /pasarelasParaPais\(ubicacion\.pais\)/);
+  assert.doesNotMatch(pagina, /\["payphone", "paypal"/, "la lista de pasarelas ya no está fija");
 });
 await test("dolaresACentavos, validarPaquete, validarAjuste y mensajeErrorAdmin", () => {
   assert.deepEqual(["0.50", "1,5", "$3.50", "1000", "0.1"].map(dolaresACentavos), [50, 150, 350, 100000, 10]);

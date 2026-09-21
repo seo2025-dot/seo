@@ -756,6 +756,12 @@ await test("complete_onboarding valida en el servidor: nombre, usuario, fecha de
   await como(gus, "update public.user_private set ideal_partner = 'Alguien alegre, curioso y que ame viajar' where user_id = $1", [gus]);
   await falla(como(gus, "select public.complete_onboarding()"), /al menos una foto/);
   await addFoto(gus, 0);
+  // A todas las personas se les pregunta si son hombre o mujer y a quién quieren conocer (update_013)
+  await falla(como(gus, "select public.complete_onboarding()"), /hombre o mujer/);
+  await falla(como(gus, "update public.user_private set gender = 'otro' where user_id = $1", [gus]), /violates check/);
+  await como(gus, "update public.user_private set gender = 'no_dice' where user_id = $1", [gus]);
+  await falla(como(gus, "select public.complete_onboarding()"), /a quién te gustaría conocer/);
+  await como(gus, "update public.user_private set interested_in = 'todos' where user_id = $1", [gus]);
   await falla(como(gus, "update public.profiles set onboarding_completed = true where id = $1", [gus]), /permission denied/);
   await como(gus, "select public.complete_onboarding()");
   assert.equal((await q("select onboarding_completed from public.profiles where id = $1", [gus]))[0].onboarding_completed, true);
@@ -880,7 +886,7 @@ const perfilListo = (uid, campos) =>
   q(`update public.profiles set onboarding_completed = true, age = $2, height_cm = $3, bio = $4, university = $5, school = $6, interests = $7, zones = $8 where id = $1`,
     [uid, campos.edad, campos.altura, campos.bio ?? "", campos.uni ?? null, campos.colegio ?? null, campos.intereses ?? [], campos.zonas ?? []]);
 const completarPerfil = async (uid, n = 0) => {
-  await q("update public.user_private set birth_date = '1992-02-02', ideal_partner = 'Alguien alegre, sincero y con ganas de crecer juntos' where user_id = $1", [uid]);
+  await q("update public.user_private set birth_date = '1992-02-02', ideal_partner = 'Alguien alegre, sincero y con ganas de crecer juntos', gender = 'no_dice', interested_in = 'todos' where user_id = $1", [uid]);
   await q("update public.profiles set university = 'Universidad Central', school = 'Colegio Norte' where id = $1", [uid]);
   await addFoto(uid, n);
   await como(uid, "select public.complete_onboarding()");

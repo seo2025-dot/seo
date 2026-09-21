@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { dolares, type Pasarela } from "@/lib/monedas";
+import { dolares, pasarelasParaPais, type Pasarela } from "@/lib/monedas";
 import { pasarelasDisponibles, urlsDePago } from "@/lib/pagos/config";
 import { iniciarPago } from "@/lib/pagos/flujo";
 import { configPasarelas, depsPagos, sitioPublico } from "@/lib/pagos/servidor";
@@ -26,6 +26,13 @@ export async function POST(req: Request) {
   const sb = await supabaseServidor();
   const { data: sesion } = await sb.auth.getUser();
   if (!sesion.user) return error(401, "sin_sesion", "Inicia sesión para recargar monedas.");
+
+  // PayPhone solo funciona en Ecuador: si la persona dijo que está en otro país, se le indica PayPal (el navegador ya no le ofrece PayPhone).
+  if (pasarela === "payphone") {
+    const { data: perfil } = await sb.from("profiles").select("country").eq("id", sesion.user.id).maybeSingle();
+    const pais = (perfil as { country: string | null } | null)?.country;
+    if (pais && !pasarelasParaPais(pais).includes("payphone")) return error(400, "pasarela_no_disponible", "PayPhone solo está disponible en Ecuador. Paga con PayPal.");
+  }
 
   const cfg = configPasarelas();
   if (!pasarelasDisponibles(cfg)[pasarela]) return error(503, "pasarela_no_disponible", "Esta forma de pago todavía no está disponible.");
