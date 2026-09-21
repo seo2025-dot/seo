@@ -33,6 +33,8 @@ export interface Proveedor {
   nombre: string;
   descripcion: string;
   ciudad: string;
+  /** Código ISO del país (EC, CO, ES…). */
+  pais: string;
   zona: string;
   lat?: number;
   lng?: number;

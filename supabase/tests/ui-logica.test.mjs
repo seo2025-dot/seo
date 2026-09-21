@@ -7,7 +7,9 @@ import fs from "node:fs";
 import { sincronizarFotos } from "@/features/fotos/sincronizar";
 import { BORRADOR_VACIO, MIN_PAREJA_IDEAL, PASOS, edadDesde, estaturaCm, normalizarUsuario, validarBasico, validarFotos, validarIntereses, validarPareja } from "@/features/onboarding/validacion";
 import { bienvenidaNueva, frasesPruebaSocial, itemsOportunidad, saludoRecurrente } from "@/lib/mensajes";
-import { REFLEXIONES, reflexionDelDia } from "@/lib/reflexiones";
+import { REFLEXIONES, TRADICIONES, ordenDeLaRonda, reflexionDelDia, semillaDePersona, numeroDeDia } from "@/lib/reflexiones";
+import { CIUDADES, CUENCA, PAISES, PAIS_POR_CODIGO, ciudadMasCercana, coordenadasValidas, distanciaKm, etiquetaUbicacion, leerUbicacion, paisDeZona, redondearCoordenada, textoDistancia, ubicacionDesdeGps, ubicacionManual, ubicacionPorZona, zonaValida } from "@/lib/geo";
+import { SALUDO, TEMA_SEMANA, claveDiaLocal, efemerides, enesimoDomingo, faseLunar, fechaLarga, fechaLocal, fraseDeEntrada, horaTexto, momentoDelDia, pascua, proximaEfemeride, pulsoDelDia, solDelDia } from "@/lib/dia";
 import { MINIMOS, completitudPerfil, datosCompletitud } from "@/lib/completitud";
 import { MAX_VALORES, VALORES } from "@/data/catalogos";
 import {
@@ -238,15 +240,199 @@ await test("referidos: niveles, hitos y enlaces coinciden con las reglas del ser
   assert.match(mensajeInvitacion("Lucía Gómez", "https://x/y"), /^Hola, soy Lucía\./);
   assert.ok(codigoValido("AbC123def4") && !codigoValido("no-valido!") && !codigoValido("") && !codigoValido(null));
 });
-await test("reflexiones: rotan por día, son deterministas y solo llevan fuente las citas de la obra", () => {
-  assert.ok(REFLEXIONES.length >= 10);
-  assert.deepEqual(reflexionDelDia(new Date(2026, 3, 1)), reflexionDelDia(new Date(2026, 3, 1)));
-  const distintas = new Set(Array.from({ length: REFLEXIONES.length }, (_, i) => reflexionDelDia(new Date(2026, 3, 1 + i)).texto));
-  assert.equal(distintas.size, REFLEXIONES.length);
-  assert.notEqual(reflexionDelDia(new Date(2026, 3, 1), 1).texto, reflexionDelDia(new Date(2026, 3, 1)).texto);
-  for (const r of REFLEXIONES) assert.ok(!r.fuente || /Kardec/.test(r.fuente), "solo llevan fuente las citas de la obra");
-  assert.ok(REFLEXIONES.filter((r) => r.fuente).length <= 3, "las citas textuales son pocas y comprobables");
+await test("reflexiones: tres tradiciones, sin repetir dentro de una ronda, con la fuente solo en frases textuales comprobables", () => {
+  const por = (t) => REFLEXIONES.filter((r) => r.tradicion === t);
+  assert.ok(REFLEXIONES.length >= 80);
+  assert.ok(por("espiritismo").length >= 20 && por("estoicismo").length >= 30 && por("psicologia").length >= 30, "cada tradición tiene su propio catálogo");
+  assert.equal(new Set(REFLEXIONES.map((r) => r.texto)).size, REFLEXIONES.length, "sin frases duplicadas");
+  for (const r of REFLEXIONES) {
+    assert.ok(r.texto.length >= 20 && r.texto.length <= 240, `longitud: ${r.texto}`);
+    assert.ok(TRADICIONES[r.tradicion], r.tradicion);
+    // Solo las frases textuales llevan «fuente» (obra y pasaje); las demás son propias y, si parten de un concepto, lo dicen en «idea»
+    if (r.fuente) assert.match(r.fuente, /Kardec|Séneca|Epicteto|Marco Aurelio|Frankl|Rogers/, `fuente dudosa: ${r.fuente}`);
+    if (r.idea) assert.ok(!r.fuente, "una frase es cita (fuente) o reflexión propia (idea), no las dos");
+  }
+  assert.ok(REFLEXIONES.filter((r) => r.fuente).length <= 12, "las citas textuales son pocas y comprobables");
+  for (const r of REFLEXIONES.filter((x) => x.fuente && x.tradicion !== "espiritismo")) assert.match(r.fuente, /\(traducción libre\)/, "las traducciones se declaran");
 });
+await test("reflexionDelDia: cambia cada día, recorre todo el catálogo antes de repetir, no repite entre días seguidos y rota de tradición", () => {
+  assert.deepEqual(reflexionDelDia(new Date(2026, 3, 1)), reflexionDelDia(new Date(2026, 3, 1)), "determinista");
+  // Recorre una ronda completa (empezando en un múltiplo del tamaño del catálogo): cada reflexión sale exactamente una vez
+  let inicio = new Date(2026, 0, 1);
+  while (numeroDeDia(inicio) % REFLEXIONES.length !== 0) inicio = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + 1);
+  const ronda = Array.from({ length: REFLEXIONES.length }, (_, i) => reflexionDelDia(new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i)));
+  assert.equal(new Set(ronda.map((r) => r.texto)).size, REFLEXIONES.length, "todas distintas dentro de la ronda");
+  // Ningún par de días seguidos repite reflexión, ni siquiera al cambiar de ronda (probado en 3 rondas)
+  for (let i = 0; i < REFLEXIONES.length * 3; i++) {
+    const d = (n) => new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + n);
+    assert.notEqual(reflexionDelDia(d(i)).texto, reflexionDelDia(d(i + 1)).texto, `día ${i}`);
+  }
+  // La rotación entre tradiciones: en cualquier semana salen al menos dos tradiciones distintas y nunca 5 seguidas de la misma
+  let seguidas = 1;
+  let maxSeguidas = 1;
+  for (let i = 1; i < ronda.length; i++) {
+    seguidas = ronda[i].tradicion === ronda[i - 1].tradicion ? seguidas + 1 : 1;
+    maxSeguidas = Math.max(maxSeguidas, seguidas);
+  }
+  assert.ok(maxSeguidas <= 4, `demasiados días seguidos de la misma tradición: ${maxSeguidas}`);
+  for (let s = 0; s + 7 <= ronda.length; s += 7) assert.ok(new Set(ronda.slice(s, s + 7).map((r) => r.tradicion)).size >= 2, `semana ${s / 7}`);
+  // Otra rondas se barajan distinto
+  const ronda2 = ordenDeLaRonda(1).map((r) => r.texto);
+  assert.notDeepEqual(ordenDeLaRonda(0).map((r) => r.texto), ronda2);
+  assert.equal(new Set(ronda2).size, REFLEXIONES.length);
+});
+await test("reflexionDelDia: cada persona ve una distinta el mismo día y «otra reflexión» da la siguiente", () => {
+  const dia = new Date(2026, 5, 15);
+  const personas = ["ana", "beto", "carla", "diego", "eva", "fabian", "gina", "hugo"].map((id) => reflexionDelDia(dia, 0, id).texto);
+  assert.ok(new Set(personas).size >= 6, "la mayoría de las personas ve una reflexión distinta");
+  assert.deepEqual(reflexionDelDia(dia, 0, "ana"), reflexionDelDia(dia, 0, "ana"), "una misma persona ve siempre la misma ese día");
+  assert.notEqual(reflexionDelDia(dia, 1, "ana").texto, reflexionDelDia(dia, 0, "ana").texto);
+  assert.deepEqual(reflexionDelDia(dia, 1, "ana"), reflexionDelDia(new Date(2026, 5, 16), 0, "ana"), "«otra» es la de mañana, adelantada");
+  assert.ok(semillaDePersona("ana") >= 0 && semillaDePersona("ana") < REFLEXIONES.length);
+});
+
+console.log("\nGeolocalización, hora y el día de hoy");
+const CUENCA_ = CUENCA;
+await test("geo: distancias, textos y coordenadas (el redondeo protege la privacidad)", () => {
+  const quito = CIUDADES.find((c) => c.nombre === "Quito");
+  const cuenca = CIUDADES.find((c) => c.nombre === "Cuenca");
+  assert.ok(Math.abs(distanciaKm(cuenca, quito) - 308) < 6, "Cuenca–Quito ≈ 308 km");
+  assert.equal(distanciaKm(cuenca, cuenca), 0);
+  assert.ok(Math.abs(distanciaKm({ lat: 0, lng: 0 }, { lat: 0, lng: 180 }) - 20015) < 40, "media vuelta al mundo");
+  assert.deepEqual([0.3, 0.97, 3.24, 9.96, 48.4, 1200].map(textoDistancia), ["300 m", "950 m", "3,2 km", "10,0 km", "48 km", "1200 km"]);
+  assert.equal(textoDistancia(-1), "");
+  assert.equal(textoDistancia(Number.NaN), "");
+  assert.equal(redondearCoordenada(-2.90123), -2.9);
+  assert.equal(redondearCoordenada(-79.00589, 3), -79.006);
+  assert.ok(coordenadasValidas(-2.9, -79) && !coordenadasValidas(91, 0) && !coordenadasValidas(0, 181) && !coordenadasValidas(Number.NaN, 0) && !coordenadasValidas("1", "2") && !coordenadasValidas(null, null));
+  assert.deepEqual(ciudadMasCercana(-2.95, -79.0).ciudad.nombre, "Cuenca");
+  assert.equal(ciudadMasCercana(-2.95, -79.0, "CO").ciudad.pais, "CO", "se puede limitar a un país");
+});
+await test("geo: la ubicación se deduce de la zona horaria, del GPS o de la elección manual, y siempre sale redondeada", () => {
+  assert.equal(paisDeZona("America/Guayaquil"), "EC");
+  assert.equal(paisDeZona("Pacific/Galapagos"), "EC");
+  assert.equal(paisDeZona("Europe/Madrid"), "ES");
+  assert.equal(paisDeZona("Asia/Tokyo"), null);
+  assert.deepEqual(ubicacionPorZona("Asia/Tokyo"), CUENCA_, "país desconocido: Cuenca");
+  const co = ubicacionPorZona("America/Bogota");
+  assert.deepEqual([co.pais, co.ciudad, co.zona, co.fuente], ["CO", "Bogotá", "America/Bogota", "zona_horaria"]);
+  const gps = ubicacionDesdeGps(-2.90123456, -79.00589123, "America/Guayaquil");
+  assert.deepEqual([gps.pais, gps.ciudad, gps.lat, gps.lng, gps.fuente], ["EC", "Cuenca", -2.9, -79.01, "gps"], "coordenadas a 2 decimales (~1 km)");
+  const madrid = ubicacionDesdeGps(40.4201, -3.7043, "Europe/Madrid");
+  assert.deepEqual([madrid.pais, madrid.ciudad, madrid.zona], ["ES", "Madrid", "Europe/Madrid"]);
+  const campo = ubicacionDesdeGps(-1.5, -72, "America/Guayaquil");
+  assert.deepEqual([campo.pais, campo.ciudad], ["EC", undefined], "lejos de una ciudad de referencia no se inventa una ciudad");
+  assert.equal(ubicacionDesdeGps(200, 0, null), null);
+  assert.equal(ubicacionDesdeGps(-2.9, -79, "Zona/Inventada").zona, "America/Guayaquil", "una zona que el navegador no entiende se sustituye por la del país");
+  assert.deepEqual([ubicacionManual("PE", "Arequipa").ciudad, ubicacionManual("PE").ciudad, ubicacionManual("ZZ")], ["Arequipa", "Lima", null]);
+  assert.equal(etiquetaUbicacion({ pais: "EC", ciudad: "Cuenca" }), "Cuenca, Ecuador");
+  assert.equal(etiquetaUbicacion({ pais: "ES" }), "España");
+  assert.ok(PAISES.every((p) => p.zonas.includes(p.zona) && zonaValida(p.zona) && /^[A-Z]{3}$/.test(p.moneda)), "el catálogo de países es coherente");
+  assert.equal(new Set(PAISES.map((p) => p.codigo)).size, PAISES.length);
+  assert.ok(CIUDADES.every((c) => PAIS_POR_CODIGO[c.pais] && coordenadasValidas(c.lat, c.lng)));
+});
+await test("geo: leerUbicacion descarta lo manipulado y redondea lo guardado", () => {
+  const buena = JSON.stringify({ pais: "EC", ciudad: "Cuenca", lat: -2.9012, lng: -79.0088, zona: "America/Guayaquil", fuente: "gps" });
+  assert.deepEqual(leerUbicacion(buena), { pais: "EC", ciudad: "Cuenca", lat: -2.9, lng: -79.01, zona: "America/Guayaquil", fuente: "gps" });
+  for (const mala of [null, "", "no es json", "{}", JSON.stringify({ pais: "ZZ", lat: 0, lng: 0, zona: "America/Guayaquil" }), JSON.stringify({ pais: "EC", lat: 999, lng: 0, zona: "America/Guayaquil" }), JSON.stringify({ pais: "EC", lat: 0, lng: 0, zona: "<script>" }), JSON.stringify({ pais: "EC", lat: "0", lng: "0", zona: "America/Guayaquil" })]) assert.equal(leerUbicacion(mala), null, String(mala));
+  assert.equal(leerUbicacion(JSON.stringify({ pais: "EC", lat: 0, lng: 0, zona: "America/Guayaquil", fuente: "hackeo" })).fuente, "defecto");
+  assert.equal(leerUbicacion(JSON.stringify({ pais: "EC", ciudad: "x".repeat(200), lat: 0, lng: 0, zona: "America/Guayaquil" })).ciudad.length, 60);
+});
+const AHORA_D = Date.UTC(2026, 8, 23, 19, 32); // miércoles 23 de septiembre de 2026, 14:32 en Cuenca
+await test("dia: la hora y la fecha son las del lugar de la persona (zonas, horario de verano y cambio de día)", () => {
+  const cu = fechaLocal(AHORA_D, "America/Guayaquil");
+  assert.deepEqual([cu.hora, cu.minuto, cu.dia, cu.mes, cu.diaSemana, cu.diaDelAnio], [14, 32, 23, 9, 3, 266]);
+  assert.equal(fechaLarga(cu), "miércoles 23 de septiembre");
+  assert.equal(horaTexto({ hora: 7, minuto: 5 }), "07:05");
+  assert.equal(fechaLocal(AHORA_D, "Europe/Madrid").hora, 21, "Madrid en septiembre: UTC+2");
+  assert.equal(fechaLocal(Date.UTC(2026, 0, 15, 12), "Europe/Madrid").hora, 13, "Madrid en enero: UTC+1");
+  assert.equal(fechaLocal(Date.UTC(2026, 6, 1, 3), "America/Guayaquil").dia, 30, "3:00 UTC del 1 de julio todavía es 30 de junio en Cuenca");
+  assert.equal(fechaLocal(Date.UTC(2026, 11, 31, 23, 30), "Asia/Tokyo").anio, 2027);
+  assert.equal(claveDiaLocal(cu), "2026-09-23");
+  assert.deepEqual([4, 5, 11, 12, 17, 18, 20, 21, 23, 0].map(momentoDelDia), ["noche", "manana", "manana", "tarde", "tarde", "atardecer", "atardecer", "noche", "noche", "noche"]);
+  assert.deepEqual([SALUDO.manana.texto, SALUDO.tarde.texto, SALUDO.noche.texto], ["Buenos días", "Buenas tardes", "Buenas noches"]);
+});
+await test("dia: la luna sigue el calendario real (luna nueva del 11 de enero de 2024 y llena del 25)", () => {
+  const nueva = faseLunar(Date.UTC(2024, 0, 11, 12));
+  assert.deepEqual([nueva.nombre, nueva.emoji], ["Luna nueva", "🌑"]);
+  assert.ok(nueva.iluminacion <= 2);
+  assert.deepEqual([faseLunar(Date.UTC(2024, 0, 25, 18)).nombre, faseLunar(Date.UTC(2024, 0, 25, 18)).iluminacion >= 98], ["Luna llena", true]);
+  assert.equal(faseLunar(Date.UTC(2024, 0, 18, 12)).nombre, "Cuarto creciente");
+  assert.ok(faseLunar(Date.UTC(2024, 0, 3, 12)).nombre.includes("menguante"));
+  for (let i = 0; i < 60; i++) {
+    const f = faseLunar(Date.UTC(2026, 0, 1 + i, 12));
+    assert.ok(f.edad >= 0 && f.edad < 29.54 && f.iluminacion >= 0 && f.iluminacion <= 100 && f.emoji, `día ${i}`);
+  }
+  // Un ciclo lunar completo pasa por las 8 fases
+  assert.equal(new Set(Array.from({ length: 30 }, (_, i) => faseLunar(Date.UTC(2026, 0, 1 + i, 12)).nombre)).size, 8);
+});
+await test("dia: amanecer y ocaso por ubicación (equinoccio en Cuenca, verano e invierno en Madrid, sol de medianoche)", () => {
+  const cuenca = solDelDia(AHORA_D, CUENCA_);
+  assert.match(cuenca.amanece, /^0[56]:\d\d$/);
+  assert.match(cuenca.anochece, /^18:\d\d$/);
+  assert.ok(cuenca.horasDeLuz > 11.9 && cuenca.horasDeLuz < 12.3, "en el ecuador el día dura casi 12 h todo el año");
+  for (let mes = 0; mes < 12; mes++) {
+    const s = solDelDia(Date.UTC(2026, mes, 15, 17), CUENCA_);
+    assert.ok(s.horasDeLuz >= 11.8 && s.horasDeLuz <= 12.4 && s.amanece < "06:30" && s.amanece > "05:40", `mes ${mes + 1}: ${s.amanece}`);
+  }
+  const madrid = ubicacionManual("ES", "Madrid");
+  const verano = solDelDia(Date.UTC(2026, 5, 21, 12), madrid);
+  const invierno = solDelDia(Date.UTC(2026, 11, 21, 12), madrid);
+  assert.ok(verano.horasDeLuz > 14.5 && invierno.horasDeLuz < 9.8, `${verano.horasDeLuz} / ${invierno.horasDeLuz}`);
+  assert.ok(verano.anochece > "21:00" && invierno.anochece < "18:30");
+  const sur = solDelDia(Date.UTC(2026, 5, 21, 12), ubicacionManual("AR", "Buenos Aires"));
+  assert.ok(sur.horasDeLuz < 10.5, "el invierno austral tiene días cortos en junio");
+  const polar = solDelDia(Date.UTC(2026, 5, 21, 12), { lat: 80, lng: 10, zona: "Europe/Berlin" });
+  assert.deepEqual(polar, { amanece: null, anochece: null, horasDeLuz: null });
+});
+await test("dia: Pascua, Carnaval, Viernes Santo y los días de la Madre y del Padre caen donde deben", () => {
+  assert.deepEqual([2024, 2025, 2026, 2027, 2028].map((a) => [pascua(a).mes, pascua(a).dia]), [[3, 31], [4, 20], [4, 5], [3, 28], [4, 16]]);
+  assert.deepEqual([efemerides({ anio: 2026, mes: 2, dia: 16 }, "EC")[0].titulo, efemerides({ anio: 2026, mes: 2, dia: 17 }, "EC")[0].titulo], ["Carnaval (lunes)", "Carnaval (martes)"]);
+  assert.equal(efemerides({ anio: 2026, mes: 4, dia: 3 }, "EC")[0].titulo, "Viernes Santo");
+  assert.equal(efemerides({ anio: 2026, mes: 5, dia: 10 }, "EC")[0].titulo, "Día de la Madre");
+  assert.equal(efemerides({ anio: 2026, mes: 6, dia: 21 }, "EC")[0].titulo, "Día del Padre");
+  assert.deepEqual([enesimoDomingo(2026, 5, 2), enesimoDomingo(2026, 6, 3), enesimoDomingo(2027, 5, 2)], [10, 21, 9]);
+});
+await test("dia: los feriados son de Ecuador y no se atribuyen a otros países; las conmemoraciones mundiales sí valen en todos", () => {
+  const dia = (mes, d) => ({ anio: 2026, mes, dia: d });
+  assert.equal(efemerides(dia(11, 3), "EC")[0].titulo, "Independencia de Cuenca (1820)");
+  assert.equal(efemerides(dia(11, 3), "EC")[0].tipo, "feriado");
+  assert.deepEqual(efemerides(dia(11, 3), "CO"), [], "Colombia no celebra la independencia de Cuenca");
+  assert.deepEqual(efemerides(dia(5, 24), "PE"), []);
+  assert.equal(efemerides(dia(3, 8), "ES")[0].titulo, "Día Internacional de la Mujer");
+  assert.equal(efemerides(dia(10, 10), "MX")[0].titulo, "Día Mundial de la Salud Mental");
+  assert.equal(efemerides(dia(4, 12), "EC")[0].tipo, "local");
+  assert.deepEqual(efemerides(dia(7, 9), "EC"), [], "un día sin nada especial no inventa efemérides");
+  // Desde el 23 de septiembre, lo próximo en Ecuador es la Independencia de Guayaquil (9 oct = 16 días)
+  const p = proximaEfemeride(dia(9, 23), "EC");
+  assert.deepEqual([p.efemeride.titulo, p.dias], ["Independencia de Guayaquil (1820)", 16]);
+  assert.equal(proximaEfemeride(dia(9, 23), "EC", 10), null, "solo mira dentro del plazo");
+  assert.equal(proximaEfemeride({ anio: 2026, mes: 12, dia: 30 }, "EC").dias, 1, "cruza el fin de año");
+  assert.equal(proximaEfemeride({ anio: 2026, mes: 12, dia: 30 }, "EC").efemeride.titulo, "Año Viejo");
+});
+await test("dia: la frase de entrada cambia cada día y en cada visita, y respeta el momento del día", () => {
+  const f = (dia, hora) => ({ anio: 2026, mes: 9, dia, hora });
+  assert.equal(fraseDeEntrada("Ana", f(23, 9), 0), fraseDeEntrada("Ana", f(23, 9), 0), "determinista");
+  const visitas = new Set(Array.from({ length: 6 }, (_, v) => fraseDeEntrada("Ana", f(23, 9), v)));
+  assert.equal(visitas.size, 6, "seis visitas seguidas, seis frases distintas");
+  const dias = new Set(Array.from({ length: 12 }, (_, d) => fraseDeEntrada("Ana", f(1 + d, 9), 0)));
+  assert.ok(dias.size >= 6, "días distintos, frases distintas");
+  for (const hora of [9, 14, 19, 23]) assert.ok(fraseDeEntrada("Ana", f(23, hora), 0).includes("Ana"), "usa el nombre");
+  assert.notEqual(fraseDeEntrada("Ana", f(23, 9), 0), fraseDeEntrada("Ana", f(23, 23), 0), "de mañana y de noche no son las mismas");
+  assert.equal(TEMA_SEMANA.length, 7);
+  assert.ok(TEMA_SEMANA.every((t) => t.accion.href.startsWith("/") && t.texto.length > 20));
+});
+await test("dia: pulsoDelDia junta todo para un lugar (Cuenca por defecto) y cambia con la ubicación", () => {
+  const p = pulsoDelDia(AHORA_D);
+  assert.deepEqual([p.hora, p.fechaLarga, p.saludo.texto, p.signo.nombre, p.lugar, p.tema.accion.href], ["14:32", "miércoles 23 de septiembre", "Buenas tardes", "Libra", "Cuenca", "/comunidad"]);
+  assert.ok(p.sol.amanece && p.luna.emoji);
+  assert.deepEqual([p.proxima.efemeride.titulo, p.proxima.dias], ["Independencia de Guayaquil (1820)", 16]);
+  const madrid = pulsoDelDia(AHORA_D, ubicacionManual("ES", "Madrid"));
+  assert.deepEqual([madrid.hora, madrid.saludo.texto, madrid.lugar, madrid.proxima.efemeride.tipo !== "feriado"], ["21:32", "Buenas noches", "Madrid", true], "otra zona horaria, otro saludo, sin feriados de Ecuador");
+  const tokio = pulsoDelDia(Date.UTC(2026, 11, 31, 23, 30), { pais: "EC", ciudad: "Tokio", lat: 35.68, lng: 139.65, zona: "Asia/Tokyo", fuente: "manual" });
+  assert.deepEqual([tokio.fecha.anio, tokio.fechaLarga], [2027, "viernes 1 de enero"]);
+});
+
 
 const PERFIL_VACIO = { bio: "", fotos: 0, ubicacion: "", zonas: [], intereses: [], estilo: [], parejaIdeal: "", relaciones: [], parejaIdealValores: [], parejaIdealEstilo: [] };
 const PERFIL_LLENO = {

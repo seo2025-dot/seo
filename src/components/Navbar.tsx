@@ -10,6 +10,7 @@ import { tiempoRelativo } from "@/lib/social";
 import Avatar from "@/components/Avatar";
 import Icono, { type NombreIcono } from "@/components/Icono";
 import { TextoConMonedas } from "@/components/IconoMoneda";
+import RelojCiudad from "@/components/RelojCiudad";
 
 const esActivo = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -120,6 +121,7 @@ export default function Navbar() {
         </Link>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <RelojCiudad />
           {sesion.uid ? (
             <>
               <Link

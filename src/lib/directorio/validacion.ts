@@ -45,6 +45,12 @@ export interface BorradorNegocio {
   direccion: string;
   horario: Horario;
   abierto24h: boolean;
+  /** Dónde está el negocio (código de país y ciudad). Por defecto Ecuador / Cuenca. */
+  pais: string;
+  ciudad: string;
+  /** Coordenadas del local (3 decimales ≈ 110 m; un negocio es un lugar público). Opcionales: sin ellas no sale en «cerca de mí». */
+  lat?: number;
+  lng?: number;
   logo?: string;
   portada?: string;
   items: BorradorItem[];
@@ -66,6 +72,8 @@ export const borradorVacio = (): BorradorNegocio => ({
   direccion: "",
   horario: {},
   abierto24h: false,
+  pais: "EC",
+  ciudad: "Cuenca",
   items: [],
 });
 
@@ -179,7 +187,9 @@ export function filaProveedor(b: BorradorNegocio, uid: string, imagenes: { logoU
     subtype: b.subtipo,
     name: b.nombre.trim(),
     description: b.descripcion.trim(),
-    city: "Cuenca",
+    city: b.ciudad.trim() || "Cuenca",
+    country: b.pais || "EC",
+    ...(b.lat !== undefined && b.lng !== undefined ? { lat: b.lat, lng: b.lng } : {}),
     zone: b.zona.trim(),
     channels: b.canales,
     open_24h: b.abierto24h,
@@ -208,6 +218,10 @@ export function borradorDesdeProveedor(p: Proveedor, contacto: ContactoProveedor
     direccion: contacto?.direccion ?? "",
     horario: p.horario,
     abierto24h: p.abierto24h,
+    pais: p.pais,
+    ciudad: p.ciudad,
+    lat: p.lat,
+    lng: p.lng,
     logo: p.logoUrl,
     portada: p.portadaUrl,
     items: [],
@@ -223,6 +237,9 @@ export function filaActualizacion(b: BorradorNegocio, imagenes: { logoUrl?: stri
   return {
     name: b.nombre.trim(),
     description: b.descripcion.trim(),
+    city: b.ciudad.trim() || "Cuenca",
+    country: b.pais || "EC",
+    ...(b.lat !== undefined && b.lng !== undefined ? { lat: b.lat, lng: b.lng } : {}),
     zone: b.zona.trim(),
     channels: b.canales,
     open_24h: b.abierto24h,

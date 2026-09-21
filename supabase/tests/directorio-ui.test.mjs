@@ -191,7 +191,12 @@ await test("paso 5: catálogo (las filas vacías se ignoran; precio obligatorio;
   assert.ok("items" in validarPasoCatalogo({ ...b, items: muchos }));
 });
 await test("PARIDAD: las filas generadas solo usan columnas que el cliente puede insertar según SQL, y respetan los límites", () => {
-  const grant = (tabla) => new RegExp(`grant insert \\(([^)]*)\\)[^;]*on public\\.${tabla} to authenticated`, "s").exec(SQL_006)[1].split(",").map((c) => c.trim());
+  const SQL_012 = fs.readFileSync(new URL("../update_012_geolocalizacion.sql", import.meta.url), "utf8");
+  const grant = (tabla) => [
+    ...new RegExp(`grant insert \\(([^)]*)\\)[^;]*on public\\.${tabla} to authenticated`, "s").exec(SQL_006)[1].split(",").map((c) => c.trim()),
+    ...(tabla === "providers" ? ["country"] : []), // añadido por la 012: grant insert (country), update (country) on public.providers
+  ];
+  assert.match(SQL_012, /grant insert \(country\), update \(country\) on public\.providers to authenticated/);
   const b = { ...negocioValido(), items: [{ seccion: "Bebidas", nombre: "Jugo", descripcion: "Natural", precio: "2,5", receta: false }, itemVacio()] };
   const prov = filaProveedor(b, "uid-1", { logoUrl: "https://x/logo.png" });
   for (const c of Object.keys(prov)) assert.ok(grant("providers").includes(c), `providers.${c} no es insertable`);
@@ -241,8 +246,10 @@ await test("consulta y enlaces canónicos: sin valores por defecto, en orden fij
 });
 await test("argumentosBusqueda usa los nombres de parámetros de search_providers y pide una fila de más", () => {
   const a = argumentosBusqueda("salud", { ...FILTROS_INICIALES, deTurno: true, zona: "Centro", pagina: 3 });
-  assert.deepEqual(a, { p_vertical: "salud", p_subtype: null, p_zone: "Centro", p_q: null, p_open_now: false, p_delivers: false, p_verified: false, p_on_duty: true, p_limit: TAM_PAGINA + 1, p_offset: 2 * TAM_PAGINA });
-  const firma = /create or replace function public\.search_providers\(([^)]*)\)/s.exec(fs.readFileSync(new URL("../update_007_buscador_universal.sql", import.meta.url), "utf8"))[1];
+  assert.deepEqual(a, { p_vertical: "salud", p_subtype: null, p_zone: "Centro", p_q: null, p_open_now: false, p_delivers: false, p_verified: false, p_on_duty: true, p_lat: null, p_lng: null, p_country: null, p_limit: TAM_PAGINA + 1, p_offset: 2 * TAM_PAGINA });
+  const cerca = argumentosBusqueda("delivery", { ...FILTROS_INICIALES, lat: -2.9, lng: -79.01, pais: "EC" });
+  assert.deepEqual([cerca.p_lat, cerca.p_lng, cerca.p_country], [-2.9, -79.01, "EC"]);
+  const firma = /create or replace function public\.search_providers\(([^)]*)\)/s.exec(fs.readFileSync(new URL("../update_012_geolocalizacion.sql", import.meta.url), "utf8"))[1];
   for (const k of Object.keys(a)) assert.ok(firma.includes(k), `search_providers no tiene ${k}`);
   assert.deepEqual(["  ", "a", " ceviche  mixto ", ["pan", "x"], undefined].map(consultaUniversal), ["", "", "ceviche mixto", "pan", ""]);
 });
@@ -335,7 +342,7 @@ await test("borradorDesdeProveedor y filaActualizacion: solo columnas actualizab
   assert.deepEqual([b.vertical, b.subtipo, b.nombre, b.costoEnvio, b.pedidoMinimo, b.whatsapp, b.telefono, b.direccion, b.items], ["delivery", "restaurante", "Sabor Cuencano", "1.5", "5", "0991234567", "", "Av. Solano 1-23", []]);
   assert.equal(borradorDesdeProveedor(proveedor({ delivery_fee: 0, min_order: 0 }), null).costoEnvio, "", "cero = vacío en el formulario");
   const fila = filaActualizacion(b);
-  const grantUpdate = new RegExp("grant update \\(([^)]*)\\)[^;]*on public\\.providers to authenticated", "s").exec(SQL_006)[1].split(",").map((c) => c.trim());
+  const grantUpdate = new RegExp("grant update \\(([^)]*)\\)[^;]*on public\\.providers to authenticated", "s").exec(SQL_006)[1].split(",").map((c) => c.trim()).concat(["country"]); // country: añadido por la 012
   for (const c of Object.keys(fila)) assert.ok(grantUpdate.includes(c), `providers.${c} no es actualizable`);
   assert.ok(!("logo_url" in fila) && !("cover_url" in fila), "sin cambio de imagen no se toca");
   assert.deepEqual([filaActualizacion(b, { logoUrl: "https://x/n.png" }).logo_url, filaActualizacion(b, { portadaUrl: null }).cover_url], ["https://x/n.png", null], "null = quitar");

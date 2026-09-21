@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { VERTICAL_POR_ID, type VerticalId } from "@/data/directorio";
 import { OPCIONES_ZONA } from "@/features/directorio/Bloques";
+import BotonCerca from "@/features/directorio/BotonCerca";
 import { filtrosActivos, hrefLista, type FiltrosLista } from "@/lib/directorio/filtros";
 
 const campo = "w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-sm focus:border-brand-500 focus:outline-none focus:ring-2 focus:ring-brand-100";
@@ -69,6 +70,7 @@ export default function FiltrosListado({ vertical, filtros }: { vertical: Vertic
             🚨 De turno ahora
           </Chip>
         )}
+        <BotonCerca vertical={vertical} filtros={filtros} />
         <Chip href={hrefLista(vertical, filtros, { abierto: !filtros.abierto })} activo={filtros.abierto}>
           🟢 Abierto ahora
         </Chip>

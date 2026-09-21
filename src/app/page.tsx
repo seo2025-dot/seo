@@ -18,6 +18,7 @@ import SeccionQueEs from "@/components/SeccionQueEs";
 import TendenciasSemana from "@/components/TendenciasSemana";
 import { useEscritorio } from "@/features/comunidad/hooks";
 import { useConteosDirectorio } from "@/features/directorio/hooks";
+import PulsoDelDia from "@/components/PulsoDelDia";
 
 /** «12 negocios» cuando hay datos reales; «Nuevo» mientras la sección arranca (nunca se inventa una cifra). */
 const chipDirectorio = (n: number | undefined, plural: string) => (n ? `${n} ${plural}` : "Nuevo");
@@ -64,8 +65,9 @@ export default function Home() {
   return (
     <>
       {/* 1 · Las categorías, lo primero que se ve al entrar */}
-      <section className="hero-suave px-4 pb-8 pt-6 sm:pb-10 sm:pt-10" aria-labelledby="explora">
+      <section id="hoy" className="hero-suave scroll-mt-20 px-4 pb-8 pt-6 sm:pb-10 sm:pt-10" aria-labelledby="explora">
         <div className="mx-auto max-w-6xl">
+          <PulsoDelDia />
           <motion.h1
             id="explora"
             initial={{ opacity: 0, y: 12 }}

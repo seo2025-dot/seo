@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import Chips from "@/components/Chips";
 import { ZONAS } from "@/data/catalogos";
 import { CANALES, VERTICALES, VERTICAL_POR_ID, type CanalId, type VerticalId } from "@/data/directorio";
 import { Campo, claseCampo } from "@/features/directorio/alta/Campos";
+import { pedirGps } from "@/features/geo/ubicacion";
+import { CIUDADES, PAISES, PAIS_POR_CODIGO, redondearCoordenada } from "@/lib/geo";
 import { LIMITES, type BorradorNegocio, type Errores } from "@/lib/directorio/validacion";
 
 type Cambio = (parche: Partial<BorradorNegocio>) => void;
@@ -73,6 +76,61 @@ export function SelectorTipo({ b, onElegir, errores }: { b: BorradorNegocio; onE
   );
 }
 
+/** País, ciudad y punto en el mapa del negocio. Sin coordenadas el negocio se lista igual, pero no sale ordenado en «Cerca de mí». */
+function UbicacionNegocio({ b, onChange }: { b: BorradorNegocio; onChange: Cambio }) {
+  const [buscando, setBuscando] = useState(false);
+  const [aviso, setAviso] = useState<string | null>(null);
+  const ciudades = CIUDADES.filter((c) => c.pais === (b.pais || "EC"));
+
+  const ubicarme = async () => {
+    setBuscando(true);
+    setAviso(null);
+    const r = await pedirGps();
+    setBuscando(false);
+    if (!r.ok) return setAviso("No pudimos ubicarte. Puedes elegir el país y la ciudad y dejar el punto sin marcar.");
+    // Un negocio es un lugar público: se guarda con 3 decimales (≈110 m), no con la precisión completa del GPS.
+    onChange({ pais: r.ubicacion.pais, ciudad: r.ubicacion.ciudad ?? b.ciudad, lat: redondearCoordenada(r.ubicacion.lat, 3), lng: redondearCoordenada(r.ubicacion.lng, 3) });
+    setAviso("Listo: ubicamos tu negocio. Asegúrate de estar en el local al pulsarlo.");
+  };
+
+  return (
+    <fieldset className="space-y-3 rounded-2xl border border-slate-200 bg-slate-50/60 p-4">
+      <legend className="px-1 text-sm font-bold text-ink">Dónde está tu negocio</legend>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Campo id="neg-pais" etiqueta="País">
+          <select id="neg-pais" value={b.pais || "EC"} onChange={(e) => onChange({ pais: e.target.value, ciudad: PAIS_POR_CODIGO[e.target.value]?.capital ?? "", zona: e.target.value === "EC" ? b.zona : "", lat: undefined, lng: undefined })} className={claseCampo}>
+            {PAISES.map((p) => (
+              <option key={p.codigo} value={p.codigo}>
+                {p.nombre}
+              </option>
+            ))}
+          </select>
+        </Campo>
+        <Campo id="neg-ciudad" etiqueta="Ciudad">
+          <input id="neg-ciudad" list="neg-ciudades" value={b.ciudad ?? ""} onChange={(e) => onChange({ ciudad: e.target.value, lat: undefined, lng: undefined })} maxLength={60} className={claseCampo} />
+          <datalist id="neg-ciudades">
+            {ciudades.map((c) => (
+              <option key={c.nombre} value={c.nombre} />
+            ))}
+          </datalist>
+        </Campo>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <button type="button" onClick={() => void ubicarme()} disabled={buscando} className="rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-bold text-ink hover:border-brand-400 disabled:opacity-60">
+          {buscando ? "Buscando…" : b.lat !== undefined ? "📍 Actualizar el punto de mi negocio" : "📍 Marcar mi negocio en el mapa"}
+        </button>
+        {b.lat !== undefined && b.lng !== undefined && <span className="text-xs font-semibold text-emerald-700">Punto marcado ({b.lat}, {b.lng})</span>}
+      </div>
+      <p className="text-xs text-slate-500">Así te encuentran «cerca de mí». Solo se guarda un punto aproximado del local (~100 m).</p>
+      {aviso && (
+        <p role="status" className="text-xs font-medium text-slate-700">
+          {aviso}
+        </p>
+      )}
+    </fieldset>
+  );
+}
+
 /** Nombre, descripción, zona, cómo atiende y costos de entrega. */
 export function FormDatos({ b, onChange, errores }: { b: BorradorNegocio; onChange: Cambio; errores: Errores }) {
   const entrega = b.canales.includes("entrega");
@@ -84,7 +142,11 @@ export function FormDatos({ b, onChange, errores }: { b: BorradorNegocio; onChan
       <Campo id="neg-desc" etiqueta={<>Descripción <span className="font-normal text-slate-400">(opcional)</span></>} ayuda={`${b.descripcion.trim().length}/${LIMITES.descripcionMax} · Cuenta qué te hace especial: especialidad, años de experiencia, entrega rápida…`} error={errores.descripcion}>
         <textarea id="neg-desc" value={b.descripcion} onChange={(e) => onChange({ descripcion: e.target.value })} rows={3} maxLength={LIMITES.descripcionMax} aria-invalid={!!errores.descripcion} className={claseCampo} />
       </Campo>
+      <UbicacionNegocio b={b} onChange={onChange} />
       <Campo id="neg-zona" etiqueta="Zona o barrio" error={errores.zona}>
+        {(b.pais || "EC") !== "EC" ? (
+          <input id="neg-zona" value={b.zona} onChange={(e) => onChange({ zona: e.target.value })} maxLength={LIMITES.zonaMax} placeholder="Barrio, sector o colonia" aria-invalid={!!errores.zona} className={claseCampo} />
+        ) : (
         <select id="neg-zona" value={b.zona} onChange={(e) => onChange({ zona: e.target.value })} aria-invalid={!!errores.zona} className={claseCampo}>
           <option value="">Elige tu zona…</option>
           {ZONAS.map((z) => (
@@ -94,6 +156,7 @@ export function FormDatos({ b, onChange, errores }: { b: BorradorNegocio; onChan
           ))}
           {b.zona && !ZONAS.includes(b.zona) && <option value={b.zona}>{b.zona}</option>}
         </select>
+        )}
       </Campo>
       <fieldset>
         <legend className="mb-1 text-sm font-bold text-ink">¿Cómo atiendes?</legend>
