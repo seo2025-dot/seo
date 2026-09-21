@@ -20,6 +20,7 @@ import {
 import { haySupabase, supabase } from "@/lib/supabaseClient";
 import { subirMedia } from "@/lib/supabase/subida";
 import IconoMoneda from "@/components/IconoMoneda";
+import { avisarAlEquipo } from "@/lib/avisos/ping";
 
 const CLAVE_BORRADOR = "conectari:alta-negocio:v1";
 const FILAS_INICIALES = 3;
@@ -160,6 +161,7 @@ export default function AsistenteAlta() {
         const items = await supabase().from("provider_items").insert(filas);
         if (items.error) avisos.push(`No se pudo guardar tu catálogo (${mensajeDe(items.error)}). Súbelo desde «Mi negocio».`);
       }
+      avisarAlEquipo();
       borrarBorrador();
       setPublicado({ id: data.id, slug: data.slug, vertical: b.vertical as VerticalId, avisos });
       void refrescarMonedero();

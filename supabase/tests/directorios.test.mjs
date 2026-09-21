@@ -1780,6 +1780,184 @@ await test("MIGRACIÓN: update_013 sobre una base con 012 (dos veces) conserva p
   }
 });
 
+// ── Avisos al administrador y panel (update_014) ────────────────────────────
+console.log("\nAvisos al administrador y panel (update_014)");
+const comoServicio = async (sql, params) => {
+  const c = new pg.Client(conn);
+  await c.connect();
+  try {
+    await c.query("begin");
+    await c.query("set local role service_role");
+    const res = await c.query(sql, params);
+    await c.query("commit");
+    return res.rows;
+  } catch (e) {
+    await c.query("rollback").catch(() => {});
+    throw e;
+  } finally {
+    await c.end();
+  }
+};
+const alertasDe = (tipo, clave, valor) => q("select * from public.admin_alerts where kind = $1 and payload ->> $2 = $3 order by created_at", [tipo, clave, valor]);
+await test("registrarse deja un aviso con correo, fecha y rol inicial (y no obliga a nada más)", async () => {
+  const id = await persona("AlertaRegistro");
+  const [a] = await alertasDe("new_user", "user_id", id);
+  assert.ok(a, "hay aviso de registro");
+  assert.equal(a.payload.email, "alertaregistro@test.dev");
+  assert.equal(a.payload.name, "AlertaRegistro");
+  assert.equal(a.payload.role, "usuario");
+  assert.equal(a.payload.email_confirmed, true);
+  assert.ok(a.payload.registered_at && a.payload.handle);
+  assert.equal(a.sent_at, null);
+  assert.equal(a.attempts, 0);
+  assert.equal((await alertasDe("new_user", "user_id", id)).length, 1, "uno solo por registro");
+});
+await test("registrar un negocio deja un aviso con el negocio y la persona dueña; enviar la verificación deja el suyo", async () => {
+  const dueno = await persona("AlertaDueno");
+  const p = await perfil(dueno, { name: "Pizzería Alerta", subtype: "restaurante", city: "Cuenca", country: "EC" });
+  const [a] = await alertasDe("new_business", "provider_id", p.id);
+  assert.ok(a);
+  assert.deepEqual([a.payload.name, a.payload.vertical, a.payload.subtype, a.payload.city, a.payload.country, a.payload.owner_name, a.payload.owner_email], ["Pizzería Alerta", "delivery", "restaurante", "Cuenca", "EC", "AlertaDueno", "alertadueno@test.dev"]);
+  await como(dueno, "select public.submit_kyc($1, $2)", [`${dueno}/documento.jpg`, `${dueno}/selfie.jpg`]);
+  const [k] = await alertasDe("new_kyc", "user_id", dueno);
+  assert.ok(k);
+  assert.deepEqual([k.payload.name, k.payload.email], ["AlertaDueno", "alertadueno@test.dev"]);
+  assert.ok(!JSON.stringify(k.payload).includes("documento.jpg"), "el aviso no lleva la ruta de la cédula");
+});
+await test("la bandeja de avisos: solo la lee un administrador; nadie la escribe desde el navegador; las funciones de envío son solo del servidor", async () => {
+  const admin = await persona("AlertaAdmin", { admin: true });
+  const normal = await persona("AlertaNormal");
+  assert.ok((await como(admin, "select count(*)::int n from public.admin_alerts"))[0].n > 0, "el administrador la ve");
+  assert.equal((await como(normal, "select count(*)::int n from public.admin_alerts"))[0].n, 0, "una persona normal no ve nada (RLS)");
+  await falla(como(null, "select count(*) from public.admin_alerts"), /permission denied/);
+  await falla(como(normal, "insert into public.admin_alerts (kind) values ('new_user')"), /permission denied/);
+  await falla(como(admin, "update public.admin_alerts set sent_at = now()"), /permission denied/);
+  for (const sql of ["select public.claim_admin_alerts(5)", "select public.finish_admin_alert(gen_random_uuid(), true, null)"]) {
+    await falla(como(admin, sql), /permission denied/);
+    await falla(como(normal, sql), /permission denied/);
+    await falla(como(null, sql), /permission denied/);
+  }
+});
+await test("claim_admin_alerts: reserva sin repetir, reintenta lo que falla (máx. 5), marca lo enviado y no manda correo de cuentas demo", async () => {
+  await q("delete from public.admin_alerts");
+  const uno = await persona("ColaUno");
+  const demo = await persona("ColaDemo");
+  await q("update public.profiles set is_demo = true where id = $1", [demo]);
+  const tres = await persona("ColaTres");
+  assert.equal((await q("select count(*)::int n from public.admin_alerts where sent_at is null"))[0].n, 3);
+  const primera = await comoServicio("select * from public.claim_admin_alerts(10)");
+  assert.deepEqual(primera.map((a) => a.payload.user_id).sort(), [uno, tres].sort(), "la cuenta demo no genera correo");
+  assert.ok(primera.every((a) => a.attempts === 1 && a.claimed_at));
+  assert.equal((await q("select last_error from public.admin_alerts where payload ->> 'user_id' = $1", [demo]))[0].last_error, "demo");
+  assert.equal((await comoServicio("select * from public.claim_admin_alerts(10)")).length, 0, "lo reservado no se reparte dos veces");
+  // Fallo: vuelve a la cola de inmediato con el error; éxito: queda enviado
+  await comoServicio("select public.finish_admin_alert($1, false, 'Resend 500')", [primera[0].id]);
+  await comoServicio("select public.finish_admin_alert($1, true, null)", [primera[1].id]);
+  const [fallado] = await q("select attempts, sent_at, last_error, claimed_at from public.admin_alerts where id = $1", [primera[0].id]);
+  assert.deepEqual([fallado.attempts, fallado.sent_at, fallado.last_error, fallado.claimed_at], [1, null, "Resend 500", null]);
+  assert.notEqual((await q("select sent_at from public.admin_alerts where id = $1", [primera[1].id]))[0].sent_at, null);
+  const otra = await comoServicio("select * from public.claim_admin_alerts(10)");
+  assert.deepEqual(otra.map((a) => [a.id, a.attempts]), [[primera[0].id, 2]], "solo el que falló, con un intento más");
+  // Una reserva que se quedó colgada (el servidor se cayó) caduca a los 2 minutos
+  await q("update public.admin_alerts set claimed_at = now() - interval '3 minutes' where id = $1", [primera[0].id]);
+  assert.equal((await comoServicio("select * from public.claim_admin_alerts(10)")).length, 1);
+  // Tras 5 intentos deja de reintentarse
+  await q("update public.admin_alerts set attempts = 5, claimed_at = null where id = $1", [primera[0].id]);
+  assert.equal((await comoServicio("select * from public.claim_admin_alerts(10)")).length, 0);
+  // El tope de lote es 25
+  await q("update public.admin_alerts set sent_at = now()");
+  for (let i = 0; i < 30; i++) await q("insert into public.admin_alerts (kind, payload) values ('new_kyc', '{}')");
+  assert.equal((await comoServicio("select * from public.claim_admin_alerts(1000)")).length, 25);
+});
+await test("un fallo al avisar nunca impide registrarse ni registrar un negocio", async () => {
+  await q("alter table public.admin_alerts add constraint admin_alerts_rota check (false) not valid");
+  try {
+    const id = await persona("SinAvisoRota");
+    assert.equal((await q("select count(*)::int n from public.profiles where id = $1", [id]))[0].n, 1, "el registro se completó igual");
+    const p = await perfil(id, { name: "Negocio sin aviso" });
+    assert.ok(p.id, "el negocio se creó igual");
+  } finally {
+    await q("alter table public.admin_alerts drop constraint admin_alerts_rota");
+  }
+});
+await test("admin_overview: cifras y últimos movimientos solo para administradores, sin contar cuentas demo", async () => {
+  const admin = await persona("PanelAdmin", { admin: true });
+  const normal = await persona("PanelNormal");
+  await falla(como(normal, "select public.admin_overview()"), /Solo administradores/);
+  await falla(como(null, "select public.admin_overview()"), /permission denied/);
+  const demo = await persona("PanelDemo");
+  await q("update public.profiles set is_demo = true where id = $1", [demo]);
+  const nueva = await persona("PanelNueva");
+  const p = await perfil(nueva, { name: "Negocio del panel", subtype: "restaurante", city: "Loja", country: "EC" });
+  await como(nueva, "select public.submit_kyc($1, $2)", [`${nueva}/d.jpg`, `${nueva}/s.jpg`]);
+  const [{ r }] = await como(admin, "select public.admin_overview() r");
+  assert.equal(r.users_total, (await q("select count(*)::int n from public.profiles where not is_demo"))[0].n);
+  assert.ok(r.users_24h >= 3 && r.users_7d >= r.users_24h && r.users_total >= r.users_7d);
+  assert.ok(r.businesses_24h >= 1 && r.businesses_total >= r.businesses_24h);
+  assert.equal(r.kyc_pending, (await q("select count(*)::int n from public.kyc_submissions where status = 'pending'"))[0].n);
+  assert.ok(r.kyc_pending >= 1 && r.alerts_unsent >= 1);
+  assert.ok(!r.recent_users.some((u) => u.id === demo), "las cuentas demo no salen");
+  const u = r.recent_users.find((x) => x.id === nueva);
+  assert.deepEqual([u.name, u.email, u.onboarding_completed], ["PanelNueva", "panelnueva@test.dev", false]);
+  assert.ok(r.recent_users.length <= 10);
+  const b = r.recent_businesses.find((x) => x.id === p.id);
+  assert.deepEqual([b.name, b.city, b.country, b.owner_name, b.owner_email], ["Negocio del panel", "Loja", "EC", "PanelNueva", "panelnueva@test.dev"]);
+  assert.ok(r.recent_users.every((x, i, l) => i === 0 || l[i - 1].created_at >= x.created_at), "los más nuevos primero");
+});
+await test("admin_kyc_queue: la cola con nombre, correo y foto de cada persona; primero lo pendiente más antiguo; solo administradores", async () => {
+  const admin = await persona("ColaKycAdmin", { admin: true });
+  const a = await persona("KycUno");
+  const b = await persona("KycDos");
+  await q("delete from public.kyc_submissions");
+  await como(a, "select public.submit_kyc($1, $2)", [`${a}/doc.jpg`, `${a}/selfie.jpg`]);
+  await como(b, "select public.submit_kyc($1, $2)", [`${b}/doc.jpg`, `${b}/selfie.jpg`]);
+  await q("update public.kyc_submissions set created_at = now() - interval '1 hour' where user_id = $1", [b]);
+  await q("update public.profiles set avatar_url = 'https://x.test/a.jpg', age = 33 where id = $1", [a]);
+  await falla(como(a, "select * from public.admin_kyc_queue()"), /Solo administradores/);
+  await falla(como(null, "select * from public.admin_kyc_queue()"), /permission denied/);
+  await falla(como(admin, "select * from public.admin_kyc_queue('cualquiera')"), /Estado no válido/);
+  const pendientes = await como(admin, "select * from public.admin_kyc_queue()");
+  assert.deepEqual(pendientes.map((x) => x.user_id), [b, a], "la más antigua primero");
+  assert.deepEqual([pendientes[1].display_name, pendientes[1].email, pendientes[1].age, pendientes[1].avatar_url, pendientes[1].doc_path, pendientes[1].selfie_path], ["KycUno", "kycuno@test.dev", 33, "https://x.test/a.jpg", `${a}/doc.jpg`, `${a}/selfie.jpg`]);
+  // Aprobar (con la función de siempre) la pasa al historial y la persona queda verificada
+  await como(admin, "select public.review_kyc($1, true)", [pendientes[0].id]);
+  assert.deepEqual((await como(admin, "select user_id from public.admin_kyc_queue('pending')")).map((x) => x.user_id), [a]);
+  const aprobadas = await como(admin, "select user_id, status, identity_verified from public.admin_kyc_queue('approved')");
+  assert.deepEqual([aprobadas[0].user_id, aprobadas[0].status, aprobadas[0].identity_verified], [b, "approved", true]);
+  assert.equal((await como(admin, "select * from public.admin_kyc_queue('all')")).length, 2);
+  assert.equal((await como(admin, "select * from public.admin_kyc_queue('all', 1)")).length, 1, "respeta el límite");
+});
+await test("MIGRACIÓN: update_014 sobre una base con 013 (dos veces) conserva perfiles y negocios, y empieza a avisar", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-014-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-014-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 014 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_014_admin_alertas.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_014 difieren");
+  await server.createDatabase("migracion14");
+  const m = new pg.Client({ ...conn, database: "migracion14" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 013
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'antes14@test.dev', '{\"full_name\":\"Antes Catorce\"}')");
+    const antes = (await m.query("select id from auth.users where email = 'antes14@test.dev'")).rows[0].id;
+    await m.query("insert into public.providers (owner_id, vertical, subtype, name) values ($1, 'delivery', 'restaurante', 'Antes de la 014')", [antes]);
+    assert.equal((await m.query("select count(*)::int n from information_schema.tables where table_name = 'admin_alerts'")).rows[0].n, 0);
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select count(*)::int n from public.admin_alerts")).rows[0].n, 0, "no se inventan avisos del pasado");
+    assert.equal((await m.query("select count(*)::int n from pg_trigger where tgname in ('profiles_admin_alert', 'providers_admin_alert', 'kyc_admin_alert') and not tgisinternal")).rows[0].n, 3, "un solo disparador de cada uno");
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'despues14@test.dev', '{\"full_name\":\"Despues Catorce\"}')");
+    const filas = (await m.query("select kind, payload ->> 'email' as email from public.admin_alerts")).rows;
+    assert.deepEqual(filas, [{ kind: "new_user", email: "despues14@test.dev" }]);
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('admin_overview', 'admin_kyc_queue', 'claim_admin_alerts', 'finish_admin_alert')")).rows[0].n, 4);
+  } finally {
+    await m.end();
+  }
+});
+
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);
 await su.end();
 await server.stop();
