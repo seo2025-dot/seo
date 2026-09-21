@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { useSocial } from "@/context/SocialContext";
 import { dolares, textoMonedas } from "@/lib/monedas";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
+import IconoMoneda from "@/components/IconoMoneda";
 
 interface Pago {
   status: "pending" | "paid" | "failed" | "cancelled";
@@ -67,7 +68,7 @@ export default function ResultadoPago() {
         <p className="mt-2 text-slate-600">
           Acreditamos <strong className="text-ink">{textoMonedas(pago.coins)}</strong> por tu recarga de {dolares(pago.amount_cents)}.
         </p>
-        <p className="mt-3 text-3xl font-black tabular-nums text-brand-700">🪙 {estado.monedas}</p>
+        <p className="mt-3 text-3xl font-black tabular-nums text-brand-700"><IconoMoneda /> {estado.monedas}</p>
         <p className="text-xs text-slate-500">Tu saldo ahora</p>
         <div className="mt-6 flex flex-wrap justify-center gap-3">
           {boton("/directorio", "Seguir usando conectari.com")}

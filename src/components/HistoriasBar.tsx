@@ -4,7 +4,7 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { POR_ID } from "@/lib/marca";
 
-const ORDEN = ["inmuebles", "vehiculos", "negocios", "busco", "citas", "astrologia", "empleos", "recompensas", "comunidad"];
+const ORDEN = ["inmuebles", "vehiculos", "negocios", "taxis", "eventos", "busco", "citas", "astrologia", "empleos", "recompensas", "comunidad"];
 
 /** Banner superior de categorías rápidas estilo "historias". `claro` = sobre un fondo de color (etiquetas oscuras). */
 export default function HistoriasBar({ claro = false }: { claro?: boolean }) {

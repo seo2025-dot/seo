@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useSocial } from "@/context/SocialContext";
 import { useCosteAccion, usePrecios, useRetosComunidad, type RetoComunidad } from "@/features/monedas/hooks";
 import { costeMensaje, esMensajeDeMonedas, mensajesHastaCobro, textoCoste, textoMonedas, type AccionUso } from "@/lib/monedas";
+import IconoMoneda, { TextoConMonedas } from "@/components/IconoMoneda";
 
 /**
  * Etiqueta con lo que costará la acción para esta persona: «🪙 Gratis · te quedan 2» o «🪙 1 moneda». Si el saldo no alcanza,
@@ -17,7 +18,7 @@ export function CosteAccion({ accion, className = "" }: { accion: AccionUso; cla
   const faltan = !e.gratis && estado.monedas < e.cuesta;
   return (
     <span className={`inline-flex flex-wrap items-center gap-x-2 text-xs font-semibold ${faltan ? "text-rose-700" : e.gratis ? "text-emerald-700" : "text-slate-600"} ${className}`}>
-      <span>🪙 {textoCoste(e)}</span>
+      <span><IconoMoneda /> {textoCoste(e)}</span>
       {faltan && (
         <Link href="/monedas" className="underline hover:text-rose-900">
           Te faltan monedas · Recargar
@@ -58,7 +59,9 @@ export function FalloOperacion({ texto, className = "" }: { texto: string; class
   const monedas = esMensajeDeMonedas(texto);
   return (
     <div role="alert" className={`rounded-xl border p-3 text-sm font-medium ${monedas ? "border-amber-200 bg-amber-50 text-amber-900" : "border-rose-200 bg-rose-50 text-rose-800"} ${className}`}>
-      <p>{texto}</p>
+      <p>
+        <TextoConMonedas texto={texto} />
+      </p>
       {monedas && (
         <p className="mt-2 flex flex-wrap gap-2">
           <Link href="/monedas" className="boton-marca rounded-full px-4 py-1.5 text-xs font-bold text-white">
@@ -111,14 +114,14 @@ function TarjetaReto({ r, onCobrar, cobrando, ahora }: { r: RetoComunidad; onCob
             <span className="text-xs font-bold text-emerald-700">Cobrado</span>
           ) : listo ? (
             <button type="button" disabled={cobrando} onClick={() => onCobrar(r)} className="boton-marca rounded-full px-4 py-2 text-sm font-bold text-white disabled:opacity-60">
-              Cobrar +{r.prize} 🪙
+              Cobrar +{r.prize} <IconoMoneda />
             </button>
           ) : r.href ? (
             <Link href={r.href} className="rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-ink hover:border-brand-400">
-              Ir · +{r.prize} 🪙
+              Ir · +{r.prize} <IconoMoneda />
             </Link>
           ) : (
-            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">+{r.prize} 🪙</span>
+            <span className="rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">+{r.prize} <IconoMoneda /></span>
           )}
         </div>
       </div>
@@ -172,8 +175,8 @@ export function RetosComunidad({ titulo = "Gana monedas gratis" }: { titulo?: st
               🌱
             </span>
             <div className="min-w-0 flex-1">
-              <p className="font-black text-ink">Invita amigos: hasta +2 000 🪙 con 20</p>
-              <p className="text-sm text-slate-700">+50 por cada amigo que se une, y bonos extra al llegar a 3, 5, 10 y 20 invitados (+600 🪙 con el reto de los 20).</p>
+              <p className="font-black text-ink">Invita amigos: hasta +2 000 <IconoMoneda /> con 20</p>
+              <p className="text-sm text-slate-700">+50 por cada amigo que se une, y bonos extra al llegar a 3, 5, 10 y 20 invitados (+600 <IconoMoneda /> con el reto de los 20).</p>
             </div>
             <span className="shrink-0 text-sm font-bold text-brand-700">Invitar →</span>
           </Link>

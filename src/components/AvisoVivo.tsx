@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AnimatePresence, motion } from "framer-motion";
 import { useSocial } from "@/context/SocialContext";
 import type { Notificacion } from "@/types/mercado";
+import { TextoConMonedas } from "@/components/IconoMoneda";
 
 /**
  * Aviso emergente en tiempo real: cuando llega una notificación nueva mientras estás en la página (una reacción, un comentario,
@@ -46,7 +47,9 @@ export default function AvisoVivo() {
         >
           <span aria-hidden className="mt-0.5 text-xl">🔔</span>
           <div className="min-w-0 flex-1 text-sm">
-            <p className="line-clamp-3 font-medium text-ink">{aviso.texto}</p>
+            <p className="line-clamp-3 font-medium text-ink">
+              <TextoConMonedas texto={aviso.texto} />
+            </p>
             {aviso.href && (
               <Link href={aviso.href} onClick={() => setAviso(null)} className="mt-1 inline-block text-xs font-bold text-brand-700 hover:underline">
                 Ver ahora →

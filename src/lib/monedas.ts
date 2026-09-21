@@ -145,6 +145,17 @@ export const PASARELAS: Record<Pasarela, { etiqueta: string; ayuda: string }> = 
   prueba: { etiqueta: "Pago de prueba", ayuda: "Solo en desarrollo: acredita al instante sin cobrar" },
 };
 
+/** PayPhone solo opera en Ecuador. */
+export const PAIS_PAYPHONE = "EC";
+
+/**
+ * Formas de pago reales que se ofrecen según el país de la persona: en Ecuador PayPhone (tarjeta o app local) y PayPal; en cualquier otro país
+ * solo PayPal (acepta tarjetas internacionales). Sin país conocido se ofrece lo de Ecuador, que es el mercado de arranque.
+ */
+export function pasarelasParaPais(pais: string | null | undefined): Exclude<Pasarela, "prueba">[] {
+  return !pais || pais === PAIS_PAYPHONE ? ["payphone", "paypal"] : ["paypal"];
+}
+
 // ── Movimientos ─────────────────────────────────────────────────────────────
 /** Texto legible del motivo de un movimiento de la billetera (`wallet_ledger.reason`). */
 export function textoMovimiento(motivo: string): string {
@@ -156,6 +167,7 @@ export function textoMovimiento(motivo: string): string {
     case "refund": return `Devolución${PRECIOS_DEFECTO.find((p) => p.accion === resto) ? `: ${PRECIOS_DEFECTO.find((p) => p.accion === resto)!.etiqueta.toLowerCase()}` : ""}`;
     case "challenge": return "Reto completado";
     case "admin": return `Regalo: ${(motivo.slice(6) || "soporte").trim()}`;
+    case "admin_debit": return `Ajuste del equipo: ${(motivo.slice(12) || "corrección").trim()}`;
     case "daily_checkin": return "Bono diario";
     case "wheel": return "Ruleta";
     case "referral": return "Invitaste a alguien";

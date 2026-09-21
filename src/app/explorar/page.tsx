@@ -7,6 +7,7 @@ import PruebaSocial from "@/components/PruebaSocial";
 import TarjetaAfinidad from "@/components/TarjetaAfinidad";
 import { FILTROS_VACIOS, useRecomendaciones, type FiltrosGaleria } from "@/features/conexion/hooks";
 import BarraCompletitud from "@/components/BarraCompletitud";
+import AvisoGenero from "@/components/AvisoGenero";
 import { useFotosPerfil } from "@/features/fotos/useFotosPerfil";
 import { completitudPerfil, datosCompletitud } from "@/lib/completitud";
 import { primerNombre } from "@/lib/mensajes";
@@ -111,6 +112,8 @@ export default function ExplorarPage() {
         <p className="mt-1 max-w-2xl text-slate-600">Ordenadas por compatibilidad: lo que buscas en tu pareja ideal, formación, intereses y estilo de vida.</p>
         <PruebaSocial className="mt-3 justify-start" />
       </header>
+
+      <AvisoGenero />
 
       {completitud.porcentaje < 100 && (
         <Link href="/perfil" className="mb-6 block rounded-2xl border border-brand-200 bg-brand-50 p-4 text-sm text-brand-900 transition hover:bg-brand-100">

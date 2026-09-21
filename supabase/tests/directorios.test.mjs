@@ -1538,6 +1538,248 @@ await test("MIGRACIÓN: update_009 sobre una base con 008 (dos veces) conserva e
   }
 });
 
+// ── Geolocalización e internacionalización (update_012) ─────────────────────
+console.log("\nGeolocalización (update_012)");
+await test("set_my_location: valida, redondea a ~1 km y guarda el país en el perfil (público) y el punto en user_private (privado)", async () => {
+  const ana = await persona("GeoAna");
+  const beto = await persona("GeoBeto");
+  await como(ana, "select public.set_my_location('EC', 'Cuenca', -2.90123456, -79.00589123, 'America/Guayaquil')");
+  const [priv] = await como(ana, "select city, lat, lng, timezone, geo_updated from public.user_private where user_id = $1", [ana]);
+  assert.deepEqual([priv.city, Number(priv.lat), Number(priv.lng), priv.timezone], ["Cuenca", -2.9, -79.01, "America/Guayaquil"], "guarda 2 decimales aunque el cliente envíe más");
+  assert.ok(priv.geo_updated);
+  // El país es público (solo dice el país); el punto y la ciudad no los lee nadie más.
+  assert.equal((await como(beto, "select country from public.profiles where id = $1", [ana]))[0].country, "EC");
+  assert.equal((await como(beto, "select lat from public.user_private where user_id = $1", [ana])).length, 0, "otra persona no ve la ubicación");
+  assert.equal((await como(null, "select country from public.profiles where id = $1", [ana]))[0].country, "EC");
+  await falla(como(null, "select lat from public.user_private"), /permission denied/);
+  // Cambiar de ciudad reemplaza, no acumula
+  await como(ana, "select public.set_my_location('ES', 'Madrid', 40.4201, -3.7043, 'Europe/Madrid')");
+  const [madrid] = await q("select p.country, u.city, u.lat, u.lng, u.timezone from public.profiles p join public.user_private u on u.user_id = p.id where p.id = $1", [ana]);
+  assert.deepEqual([madrid.country, madrid.city, Number(madrid.lat), Number(madrid.lng), madrid.timezone], ["ES", "Madrid", 40.42, -3.7, "Europe/Madrid"]);
+  // Sin ciudad: queda nula
+  await como(ana, "select public.set_my_location('CO', '   ', 4.7110, -74.0721, 'America/Bogota')");
+  assert.equal((await q("select city from public.user_private where user_id = $1", [ana]))[0].city, null);
+});
+await test("set_my_location: rechaza sesión ausente, país, coordenadas, zona y ciudad no válidos; nadie escribe la ubicación por otra vía", async () => {
+  const ana = await persona("GeoValida");
+  const llamar = (uid, ...a) => como(uid, "select public.set_my_location($1, $2, $3, $4, $5)", a);
+  await falla(llamar(null, "EC", "Cuenca", -2.9, -79, "America/Guayaquil"), /permission denied|No autenticado/);
+  await falla(llamar(ana, "ec", "Cuenca", -2.9, -79, "America/Guayaquil"), /País no válido/);
+  await falla(llamar(ana, "ECU", "Cuenca", -2.9, -79, "America/Guayaquil"), /País no válido/);
+  await falla(llamar(ana, null, "Cuenca", -2.9, -79, "America/Guayaquil"), /País no válido/);
+  await falla(llamar(ana, "EC", "Cuenca", 91, -79, "America/Guayaquil"), /Coordenadas no válidas/);
+  await falla(llamar(ana, "EC", "Cuenca", -2.9, 181, "America/Guayaquil"), /Coordenadas no válidas/);
+  await falla(llamar(ana, "EC", "Cuenca", null, null, "America/Guayaquil"), /Coordenadas no válidas/);
+  await falla(llamar(ana, "EC", "Cuenca", -2.9, -79, "<script>"), /Zona horaria no válida/);
+  await falla(llamar(ana, "EC", "Cuenca", -2.9, -79, null), /Zona horaria no válida/);
+  await falla(llamar(ana, "EC", "x".repeat(61), -2.9, -79, "America/Guayaquil"), /máximo 60/);
+  assert.equal((await q("select lat from public.user_private where user_id = $1", [ana]))[0].lat, null, "nada se guardó");
+  // Las columnas nuevas no se escriben directamente: solo por la función (que valida y redondea)
+  await falla(como(ana, "update public.user_private set lat = -2.901234 where user_id = $1", [ana]), /permission denied/);
+  await falla(como(ana, "update public.user_private set timezone = 'X/Y' where user_id = $1", [ana]), /permission denied/);
+  await falla(como(ana, "update public.profiles set country = 'CO' where id = $1", [ana]), /permission denied/);
+  await falla(como(null, "select public.clear_my_location()"), /permission denied|No autenticado/);
+});
+await test("clear_my_location: borra el país y la ubicación de quien la llama y de nadie más", async () => {
+  const ana = await persona("GeoBorra");
+  const beto = await persona("GeoQueda");
+  await como(ana, "select public.set_my_location('PE', 'Lima', -12.0464, -77.0428, 'America/Lima')");
+  await como(beto, "select public.set_my_location('MX', 'Ciudad de México', 19.4326, -99.1332, 'America/Mexico_City')");
+  await como(ana, "select public.clear_my_location()");
+  const [a] = await q("select p.country, u.city, u.lat, u.lng, u.timezone, u.geo_updated from public.profiles p join public.user_private u on u.user_id = p.id where p.id = $1", [ana]);
+  assert.deepEqual(Object.values(a), [null, null, null, null, null, null]);
+  const [b] = await q("select p.country, u.city, u.timezone from public.profiles p join public.user_private u on u.user_id = p.id where p.id = $1", [beto]);
+  assert.deepEqual(Object.values(b), ["MX", "Ciudad de México", "America/Mexico_City"]);
+  await como(ana, "select public.clear_my_location()"); // repetirlo no falla
+});
+await test("providers.country: por defecto EC, se fija al crear y al editar, con formato válido; no lo cambia otra persona", async () => {
+  const dueno = await persona("DuenoPais");
+  const otro = await persona("OtroPais");
+  const porDefecto = await perfil(dueno, { name: "Sin país", subtype: "restaurante" });
+  assert.equal((await q("select country from public.providers where id = $1", [porDefecto.id]))[0].country, "EC");
+  const bogota = await perfil(dueno, { name: "Arepas de Bogotá", country: "CO", city: "Bogotá", lat: 4.711, lng: -74.072 });
+  assert.equal((await q("select country from public.providers where id = $1", [bogota.id]))[0].country, "CO");
+  await como(dueno, "update public.providers set country = 'PE', city = 'Lima' where id = $1", [bogota.id]);
+  assert.equal((await q("select country from public.providers where id = $1", [bogota.id]))[0].country, "PE");
+  await falla(perfil(dueno, { name: "Mal país", country: "colombia" }), /violates check|providers_country_check/);
+  await falla(perfil(dueno, { name: "Mal país 2", country: "C" }), /violates check|providers_country_check/);
+  assert.equal((await como(otro, "update public.providers set country = 'MX' where id = $1 returning id", [bogota.id])).length, 0, "una persona ajena no edita el negocio");
+  assert.equal((await q("select country from public.providers where id = $1", [bogota.id]))[0].country, "PE");
+});
+await test("search_providers: p_country filtra por país, sin p_country lista todos, y con p_lat/p_lng ordena por cercanía con la distancia", async () => {
+  const d = await persona("BuscaPais");
+  const nombre = (s) => `${s} ${randomUUID().slice(0, 4)}`;
+  const lejos = await perfil(d, { name: nombre("Lejos Quito"), subtype: "restaurante", country: "EC", city: "Quito", lat: -0.1807, lng: -78.4678 });
+  const cerca = await perfil(d, { name: nombre("Cerca Cuenca"), subtype: "restaurante", country: "EC", city: "Cuenca", lat: -2.9001, lng: -79.0059 });
+  const medio = await perfil(d, { name: nombre("Medio Loja"), subtype: "restaurante", country: "EC", city: "Loja", lat: -3.9931, lng: -79.2042 });
+  const sinPunto = await perfil(d, { name: nombre("Sin punto"), subtype: "restaurante", country: "EC" });
+  const colombia = await perfil(d, { name: nombre("Bogotá Sabor"), subtype: "restaurante", country: "CO", city: "Bogotá", lat: 4.711, lng: -74.072 });
+  const buscar = (extra) => como(null, "select id, distance_km from public.search_providers('delivery', p_subtype => 'restaurante', p_country => $1, p_lat => $2, p_lng => $3, p_limit => 60)", [extra.pais ?? null, extra.lat ?? null, extra.lng ?? null]);
+  const ids = (filas) => filas.map((f) => f.id);
+  const ecuador = await buscar({ pais: "EC", lat: -2.9, lng: -79.0 });
+  assert.ok(!ids(ecuador).includes(colombia.id), "los negocios de otro país no salen");
+  const orden = ids(ecuador).filter((id) => [cerca.id, medio.id, lejos.id, sinPunto.id].includes(id));
+  assert.deepEqual(orden, [cerca.id, medio.id, lejos.id, sinPunto.id], "de más cerca a más lejos y los que no tienen punto al final");
+  const dist = Object.fromEntries(ecuador.map((f) => [f.id, f.distance_km === null ? null : Number(f.distance_km)]));
+  assert.ok(dist[cerca.id] < 2 && dist[medio.id] > 100 && dist[medio.id] < 160 && dist[lejos.id] > 280 && dist[lejos.id] < 330, JSON.stringify(dist));
+  assert.equal(dist[sinPunto.id], null);
+  assert.deepEqual(ids(await buscar({ pais: "CO" })).filter((id) => [cerca.id, lejos.id, colombia.id].includes(id)), [colombia.id]);
+  assert.equal(ids(await buscar({ pais: "ZZ" })).length, 0, "un país sin negocios devuelve una lista vacía");
+  const todos = ids(await buscar({}));
+  assert.ok([cerca.id, colombia.id].every((id) => todos.includes(id)), "sin país no se filtra");
+  // La firma anterior (12 argumentos) ya no existe: hay una sola search_providers
+  assert.equal((await q("select count(*)::int n from pg_proc where proname = 'search_providers'"))[0].n, 1);
+});
+await test("MIGRACIÓN: update_012 sobre una base con 011 (dos veces) conserva negocios y perfiles, y añade país y ubicación", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-012-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-012-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 012 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_012_geolocalizacion.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_012 difieren");
+  await server.createDatabase("migracion12");
+  const m = new pg.Client({ ...conn, database: "migracion12" });
+  await m.connect();
+  m.on("notice", () => {});
+  const como12 = async (uid, sql, params = []) => {
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: uid, role: "authenticated" })]);
+    try {
+      const r = await m.query(sql, params);
+      await m.query("commit");
+      return r.rows;
+    } catch (e) {
+      await m.query("rollback");
+      throw e;
+    }
+  };
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 011
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'geo12@test.dev', '{\"full_name\":\"Geo Doce\"}')");
+    const uid = (await m.query("select id from auth.users where email = 'geo12@test.dev'")).rows[0].id;
+    const prov = (await m.query("insert into public.providers (owner_id, vertical, subtype, name, lat, lng) values ($1, 'delivery', 'restaurante', 'Antes de la 012', -2.9, -79.0) returning id", [uid])).rows[0].id;
+    assert.equal((await m.query("select count(*)::int n from information_schema.columns where table_name = 'providers' and column_name = 'country'")).rows[0].n, 0, "antes de la 012 no existe providers.country");
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select country from public.providers where id = $1", [prov])).rows[0].country, "EC", "los negocios existentes quedan en Ecuador");
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname = 'search_providers'")).rows[0].n, 1, "una sola search_providers");
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('set_my_location', 'clear_my_location')")).rows[0].n, 2);
+    assert.equal((await m.query("select count(*)::int n from public.search_providers('delivery', p_country => 'EC', p_lat => -2.9, p_lng => -79.0)")).rows[0].n, 1);
+    await como12(uid, "select public.set_my_location('EC', 'Cuenca', -2.9012, -79.0058, 'America/Guayaquil')");
+    assert.equal(Number((await m.query("select lat from public.user_private where user_id = $1", [uid])).rows[0].lat), -2.9);
+    assert.equal((await m.query("select country from public.profiles where id = $1", [uid])).rows[0].country, "EC");
+  } finally {
+    await m.end();
+  }
+});
+
+// ── Género y a quién quiere conocer cada persona (update_013) ───────────────
+console.log("\nGénero y preferencias (update_013)");
+const inscrita = async (nombre, genero, busca) => {
+  const id = await persona(nombre);
+  await q("update public.profiles set onboarding_completed = true, age = 30, bio = 'Perfil de prueba' where id = $1", [id]);
+  await q("update public.user_private set gender = $2, interested_in = $3 where user_id = $1", [id, genero, busca]);
+  return id;
+};
+await test("género y preferencia: son privados, con valores del catálogo, y se editan solo por su dueña o dueño", async () => {
+  const ana = await persona("GenAna");
+  const beto = await persona("GenBeto");
+  await como(ana, "update public.user_private set gender = 'mujer', interested_in = 'hombres' where user_id = $1", [ana]);
+  const [propio] = await como(ana, "select gender, interested_in from public.user_private where user_id = $1", [ana]);
+  assert.deepEqual([propio.gender, propio.interested_in], ["mujer", "hombres"]);
+  assert.equal((await como(beto, "select gender from public.user_private where user_id = $1", [ana])).length, 0, "nadie más ve el género");
+  await falla(como(null, "select gender from public.user_private"), /permission denied/);
+  await falla(como(ana, "update public.user_private set gender = 'otro' where user_id = $1", [ana]), /violates check/);
+  await falla(como(ana, "update public.user_private set interested_in = 'nadie' where user_id = $1", [ana]), /violates check/);
+  assert.equal((await como(beto, "update public.user_private set gender = 'hombre' where user_id = $1 returning user_id", [ana])).length, 0, "no se edita el de otra persona");
+  assert.equal((await q("select gender from public.user_private where user_id = $1", [ana]))[0].gender, "mujer");
+  // No está en profiles (que es público): ningún perfil ajeno lo expone
+  assert.equal((await q("select count(*)::int n from information_schema.columns where table_schema = 'public' and table_name = 'profiles' and column_name in ('gender', 'interested_in')"))[0].n, 0);
+  await falla(como(ana, "select public._seek_ok('todos', 'mujer')"), /permission denied/);
+});
+await test("recommend_people y people_i_may_meet: solo aparecen quienes encajan en los DOS sentidos", async () => {
+  const ana = await inscrita("EncajaAna", "mujer", "hombres");
+  const beto = await inscrita("EncajaBeto", "hombre", "mujeres");
+  const caro = await inscrita("EncajaCaro", "mujer", "mujeres");
+  const dani = await inscrita("EncajaDani", "hombre", "todos");
+  const eli = await inscrita("EncajaEli", "no_dice", "todos");
+  const antigua = await inscrita("EncajaAntigua", null, null); // inscrita antes de la 013: sin datos
+  const grupo = [ana, beto, caro, dani, eli, antigua];
+  const nombre = { [ana]: "ana", [beto]: "beto", [caro]: "caro", [dani]: "dani", [eli]: "eli", [antigua]: "antigua" };
+  const recomendadas = async (uid) => (await como(uid, "select person_id from public.recommend_people(null, null, null, null, 60, 0)")).map((r) => r.person_id).filter((id) => grupo.includes(id)).map((id) => nombre[id]).sort();
+  const conocibles = async (uid) => (await como(uid, "select public.people_i_may_meet() id")).map((r) => r.id).filter((id) => grupo.includes(id)).map((id) => nombre[id]).sort();
+  const esperado = {
+    // ana (mujer, busca hombres): beto y dani son hombres y la quieren conocer; la antigua no dijo su género
+    [ana]: ["beto", "dani"],
+    // beto (hombre, busca mujeres): ana lo busca; caro solo busca mujeres; eli y la antigua no son «mujer»
+    [beto]: ["ana"],
+    // caro (mujer, busca mujeres): ninguna otra mujer del grupo busca mujeres (ana busca hombres)
+    [caro]: [],
+    // dani (hombre, todos): quienes lo aceptan (ana busca hombres, eli busca todos, la antigua no tiene preferencia)
+    [dani]: ["ana", "antigua", "eli"],
+    // eli (no_dice, todos): solo quienes buscan «todos» o no tienen preferencia
+    [eli]: ["antigua", "dani"],
+    // la antigua (sin preferencia) ve a quienes la aceptan a ella: quien busca algo concreto exige el género correcto y ella no lo dijo
+    [antigua]: ["dani", "eli"],
+  };
+  for (const uid of grupo) {
+    assert.deepEqual(await recomendadas(uid), esperado[uid], `recommend_people de ${nombre[uid]}`);
+    assert.deepEqual(await conocibles(uid), esperado[uid], `people_i_may_meet de ${nombre[uid]}`);
+  }
+  assert.ok(!(await como(ana, "select public.people_i_may_meet() id")).some((r) => r.id === ana), "nunca se incluye a sí misma");
+  await falla(como(null, "select public.people_i_may_meet()"), /permission denied/);
+});
+await test("MIGRACIÓN: update_013 sobre una base con 012 (dos veces) conserva perfiles y añade género, preferencia y el filtro", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-013-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-013-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 013 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_013_genero_y_preferencias.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_013 difieren");
+  await server.createDatabase("migracion13");
+  const m = new pg.Client({ ...conn, database: "migracion13" });
+  await m.connect();
+  m.on("notice", () => {});
+  const como13 = async (uid, sql, params = []) => {
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: uid, role: "authenticated" })]);
+    try {
+      const r = await m.query(sql, params);
+      await m.query("commit");
+      return r.rows;
+    } catch (e) {
+      await m.query("rollback");
+      throw e;
+    }
+  };
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 012
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'vieja13@test.dev', '{\"full_name\":\"Vieja Trece\"}'), (gen_random_uuid(), 'nueva13@test.dev', '{\"full_name\":\"Nueva Trece\"}')");
+    const [vieja, nueva] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    await m.query("update public.profiles set onboarding_completed = true, age = 30 where id in ($1, $2)", [vieja, nueva]);
+    assert.equal((await m.query("select count(*)::int n from information_schema.columns where table_name = 'user_private' and column_name = 'gender'")).rows[0].n, 0, "antes de la 013 no existe user_private.gender");
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('people_i_may_meet', '_seek_ok')")).rows[0].n, 2);
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('recommend_people', 'complete_onboarding')")).rows[0].n, 2, "una sola definición de cada una");
+    assert.equal((await m.query("select onboarding_completed from public.profiles where id = $1", [vieja])).rows[0].onboarding_completed, true, "quien ya estaba inscrita lo sigue estando");
+    // Quien ya estaba inscrita (sin datos) sigue apareciendo para quien no tiene preferencia
+    assert.deepEqual((await como13(nueva, "select public.people_i_may_meet() id")).map((r) => r.id), [vieja]);
+    assert.equal((await como13(nueva, "select count(*)::int n from public.recommend_people(null, null, null, null, 10, 0)"))[0].n, 1);
+    // …y desaparece para quien busca algo concreto hasta que indique su género
+    await como13(nueva, "update public.user_private set gender = 'mujer', interested_in = 'hombres' where user_id = $1", [nueva]);
+    assert.equal((await como13(nueva, "select count(*)::int n from public.recommend_people(null, null, null, null, 10, 0)"))[0].n, 0);
+    await como13(vieja, "update public.user_private set gender = 'hombre' where user_id = $1", [vieja]);
+    assert.equal((await como13(nueva, "select count(*)::int n from public.recommend_people(null, null, null, null, 10, 0)"))[0].n, 1);
+  } finally {
+    await m.end();
+  }
+});
+
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);
 await su.end();
 await server.stop();

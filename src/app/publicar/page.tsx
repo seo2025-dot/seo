@@ -9,6 +9,7 @@ import FormDemanda from "@/components/publicar/FormDemanda";
 import FormInmueble from "@/components/publicar/FormInmueble";
 import FormNegocio from "@/components/publicar/FormNegocio";
 import FormVehiculo from "@/components/publicar/FormVehiculo";
+import IconoMoneda from "@/components/IconoMoneda";
 
 type Modo = "vendo" | "busco";
 type Categoria = "inmueble" | "vehiculo" | "negocio";
@@ -36,7 +37,7 @@ function Publicar() {
         <Link href="/directorio/mi-negocio/nuevo" className="font-medium text-brand-600 hover:underline">
           Regístralo en el directorio
         </Link>{" "}
-        (+30 🪙 con tu primer negocio).
+        (+30 <IconoMoneda /> con tu primer negocio).
       </p>
 
       <div role="tablist" aria-label="Modo de publicación" className="mt-6 grid grid-cols-2 gap-3">

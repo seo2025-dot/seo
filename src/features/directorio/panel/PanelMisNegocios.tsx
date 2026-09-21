@@ -9,6 +9,7 @@ import { completitudNegocio } from "@/lib/directorio/completitud";
 import { mapearProveedor, type FilaProveedor } from "@/lib/directorio/mapeo";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
 import type { ContactoProveedor, Proveedor } from "@/types/directorio";
+import IconoMoneda from "@/components/IconoMoneda";
 
 interface Extras {
   contacto: ContactoProveedor | null;
@@ -118,7 +119,7 @@ export default function PanelMisNegocios() {
             🏪
           </p>
           <p className="mt-3 font-bold text-ink">Aún no has publicado ningún negocio</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">Restaurantes, cafeterías, farmacias y más: aparece gratis ante toda la ciudad. Ganas +30 🪙 con tu primer perfil.</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">Restaurantes, cafeterías, farmacias y más: aparece gratis ante toda la ciudad. Ganas +30 <IconoMoneda /> con tu primer perfil.</p>
           <Link href="/directorio/mi-negocio/nuevo" className="boton-marca mt-5 inline-block rounded-full px-7 py-3 text-sm font-bold text-white">
             Registrar mi negocio
           </Link>

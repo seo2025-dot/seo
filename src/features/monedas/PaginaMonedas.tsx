@@ -4,8 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import { useSocial } from "@/context/SocialContext";
 import { RetosComunidad } from "@/features/monedas/Piezas";
+import { useUbicacion } from "@/features/geo/ubicacion";
 import { usePrecios, useTienda, useUsos } from "@/features/monedas/hooks";
-import { BONO_PRIMERA_COMPRA_PCT, PASARELAS, ahorroFrente, bonoPrimeraCompra, dolares, estadoUso, textoCoste, textoMonedas, textoMovimiento, type PaqueteMonedas, type Pasarela } from "@/lib/monedas";
+import { BONO_PRIMERA_COMPRA_PCT, PASARELAS, ahorroFrente, bonoPrimeraCompra, dolares, estadoUso, pasarelasParaPais, textoCoste, textoMonedas, textoMovimiento, type PaqueteMonedas, type Pasarela } from "@/lib/monedas";
+import IconoMoneda from "@/components/IconoMoneda";
 
 const MENSAJES_ERROR: Record<string, string> = {
   sin_sesion: "Inicia sesión para recargar monedas.",
@@ -22,6 +24,8 @@ export default function PaginaMonedas() {
   const { paquetes, pasarelas, movimientos, primeraCompra } = useTienda();
   const precios = usePrecios();
   const { usos } = useUsos();
+  const { ubicacion } = useUbicacion();
+  const formasDePago = pasarelasParaPais(ubicacion.pais);
   const [pagando, setPagando] = useState<string | null>(null);
   const [fallo, setFallo] = useState<string | null>(null);
 
@@ -30,7 +34,7 @@ export default function PaginaMonedas() {
     return (
       <div className="mx-auto max-w-md px-4 py-16 text-center">
         <p className="text-5xl" aria-hidden>
-          🪙
+          <IconoMoneda />
         </p>
         <h1 className="mt-4 text-2xl font-black text-ink">Tus monedas</h1>
         <p className="mt-2 text-slate-500">Inicia sesión para ver tu saldo, recargar o ganar monedas con retos.</p>
@@ -68,7 +72,7 @@ export default function PaginaMonedas() {
     <div className="mx-auto max-w-3xl px-4 py-8">
       <header className="rounded-3xl bg-ink p-6 text-white">
         <p className="text-sm text-white/70">Tu saldo</p>
-        <p className="text-5xl font-black tabular-nums text-sun">🪙 {estado.monedas}</p>
+        <p className="text-5xl font-black tabular-nums text-sun"><IconoMoneda /> {estado.monedas}</p>
         <p className="mt-2 max-w-xl text-sm text-white/70">
           Tus primeros 3 usos de cada cosa son gratis. Después, las monedas mantienen la plataforma viva: las compras desde <strong className="text-white">$0.50</strong> o las ganas con retos, sin gastar dinero.
         </p>
@@ -115,7 +119,7 @@ export default function PaginaMonedas() {
           Recargar monedas
         </h2>
         <p className="text-sm text-slate-600">
-          Pago seguro con PayPhone (Ecuador) o PayPal. Las monedas llegan a tu cuenta en cuanto se confirma el pago.
+          {formasDePago.includes("payphone") ? "Pago seguro con PayPhone (Ecuador) o PayPal." : "Pago seguro con PayPal (también con tarjeta internacional)."} Las monedas llegan a tu cuenta en cuanto se confirma el pago.
           {primeraCompra && <strong className="text-brand-700"> Tu primera recarga trae +{BONO_PRIMERA_COMPRA_PCT} % de monedas extra.</strong>}
         </p>
 
@@ -129,11 +133,11 @@ export default function PaginaMonedas() {
                 {p.insignia && <span className="absolute -top-3 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-brand-600 px-3 py-1 text-xs font-black text-white">{p.insignia}</span>}
                 <p className="text-sm font-bold text-slate-500">{p.etiqueta}</p>
                 <p className="mt-1 text-4xl font-black tabular-nums text-ink">{dolares(p.centavos)}</p>
-                <p className="mt-2 text-lg font-black text-brand-700">🪙 {p.monedas}</p>
+                <p className="mt-2 text-lg font-black text-brand-700"><IconoMoneda /> {p.monedas}</p>
                 {extra > 0 && <p className="text-sm font-bold text-emerald-700">+{extra} de regalo → {p.monedas + extra} en total</p>}
                 {ahorro > 0 && <p className="text-xs text-slate-500">Cada moneda sale {ahorro} % más barata</p>}
                 <div className="mt-4 space-y-2">
-                  {(["payphone", "paypal", ...(pasarelas?.prueba ? (["prueba"] as const) : [])] as Pasarela[]).map((k) => {
+                  {([...formasDePago, ...(pasarelas?.prueba ? (["prueba"] as const) : [])] as Pasarela[]).map((k) => {
                     const disponible = pasarelas?.[k] ?? false;
                     return (
                       <button
@@ -188,7 +192,7 @@ export default function PaginaMonedas() {
                 </div>
                 <span className={`shrink-0 font-black tabular-nums ${m.delta > 0 ? "text-emerald-700" : "text-slate-600"}`}>
                   {m.delta > 0 ? "+" : ""}
-                  {m.delta} 🪙
+                  {m.delta} <IconoMoneda />
                 </span>
               </li>
             ))}

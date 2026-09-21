@@ -10,6 +10,7 @@ import { useRetos } from "@/features/conexion/hooks";
 import { RetosComunidad } from "@/features/monedas/Piezas";
 import { primerNombre } from "@/lib/mensajes";
 import { msHastaReinicio, RETOS, resumenRetos } from "@/lib/retos";
+import IconoMoneda from "@/components/IconoMoneda";
 
 export default function RetosPage() {
   const { estado, sesion, hidratado, refrescarMonedero } = useSocial();
@@ -53,7 +54,7 @@ export default function RetosPage() {
             <h1 className="text-3xl font-black">Retos diarios</h1>
           </div>
           <div className="text-right">
-            <p className="text-3xl font-black tabular-nums text-sun">🪙 {estado.monedas}</p>
+            <p className="text-3xl font-black tabular-nums text-sun"><IconoMoneda /> {estado.monedas}</p>
             <p className="text-xs text-white/60">🔥 Racha: {estado.racha} {estado.racha === 1 ? "día" : "días"}</p>
           </div>
         </div>
@@ -100,14 +101,14 @@ export default function RetosPage() {
                   disabled={cobrando === reto.id}
                   className="boton-marca shrink-0 rounded-full px-4 py-2 text-sm font-bold text-white disabled:opacity-60"
                 >
-                  Cobrar +{e?.prize ?? reto.premio} 🪙
+                  Cobrar +{e?.prize ?? reto.premio} <IconoMoneda />
                 </button>
               ) : reto.href ? (
                 <Link href={reto.href} className="shrink-0 rounded-full border border-slate-300 px-4 py-2 text-sm font-semibold text-ink hover:border-brand-400">
-                  Ir · +{e?.prize ?? reto.premio} 🪙
+                  Ir · +{e?.prize ?? reto.premio} <IconoMoneda />
                 </Link>
               ) : (
-                <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">+{e?.prize ?? reto.premio} 🪙</span>
+                <span className="shrink-0 rounded-full bg-slate-100 px-3 py-1.5 text-xs font-bold text-slate-500">+{e?.prize ?? reto.premio} <IconoMoneda /></span>
               )}
             </li>
           );
@@ -132,7 +133,7 @@ export default function RetosPage() {
             <p className="text-sm font-semibold text-emerald-700">✓ Reflexión de hoy leída</p>
           ) : (
             <button type="button" onClick={() => void alCobrar("reflexion", "Reflexión del día")} className="rounded-full bg-violet-600 px-5 py-2 text-sm font-bold text-white hover:bg-violet-700">
-              La leí · +{estadoDe("reflexion")?.prize ?? 5} 🪙
+              La leí · +{estadoDe("reflexion")?.prize ?? 5} <IconoMoneda />
             </button>
           )
         }

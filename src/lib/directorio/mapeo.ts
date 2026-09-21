@@ -34,6 +34,7 @@ export interface FilaProveedor {
   name: string;
   description: string;
   city: string;
+  country?: string;
   zone: string;
   lat: number | string | null;
   lng: number | string | null;
@@ -143,6 +144,7 @@ export function mapearProveedor(f: FilaProveedor): Proveedor | null {
     nombre: f.name,
     descripcion: f.description ?? "",
     ciudad: f.city,
+    pais: f.country ?? "EC",
     zona: f.zone ?? "",
     lat: numONull(f.lat),
     lng: numONull(f.lng),

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { VERTICAL_POR_ID, etiquetaSubtipo, rutaProveedor } from "@/data/directorio";
 import { InsigniaAbierto, InsigniaTurno, InsigniaVerificado, Valoracion } from "@/features/directorio/Insignias";
 import { textoDinero } from "@/lib/directorio/mapeo";
+import { textoDistancia } from "@/lib/geo";
 import type { ResultadoLista } from "@/types/directorio";
 
 /** Tarjeta de un negocio en listados. Sin JavaScript: se renderiza en el servidor. */
@@ -44,7 +45,7 @@ export default function TarjetaProveedor({ p, prioridad = false }: { p: Resultad
             <p className="truncate text-xs text-slate-500">
               {etiquetaSubtipo(p.vertical, p.subtipo)}
               {p.zona && <> · 📍 {p.zona}</>}
-              {p.distanciaKm !== undefined && <> · {p.distanciaKm < 1 ? `${Math.round(p.distanciaKm * 1000)} m` : `${p.distanciaKm.toFixed(1)} km`}</>}
+              {p.distanciaKm !== undefined && <> · {textoDistancia(p.distanciaKm)}</>}
             </p>
           </div>
         </div>

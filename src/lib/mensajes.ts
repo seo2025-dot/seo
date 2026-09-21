@@ -86,7 +86,7 @@ export function itemsOportunidad(d: DatosOportunidad): ItemOportunidad[] {
   if (d.personasNuevas7d > 0)
     items.push({ id: "nuevas", emoji: "✨", texto: `${plural(d.personasNuevas7d, "persona nueva se unió", "personas nuevas se unieron")} esta semana y aún no las has visto.`, href: "/explorar", accion: "Descubrirlas" });
   if (d.monedasPorCobrar > 0)
-    items.push({ id: "cobrar", emoji: "🪙", texto: `Tienes ${d.monedasPorCobrar} monedas listas para cobrar de tus retos.`, href: "/retos", accion: "Cobrar" });
+    items.push({ id: "cobrar", emoji: "💰", texto: `Tienes ${d.monedasPorCobrar} monedas listas para cobrar de tus retos.`, href: "/retos", accion: "Cobrar" });
   else if (d.monedasEnJuego > 0 && d.horasParaReinicio <= 6)
     items.push({ id: "reinicio", emoji: "⏳", texto: `Los retos se reinician en ${Math.max(1, Math.ceil(d.horasParaReinicio))} h: quedan ${d.monedasEnJuego} monedas por ganar hoy.`, href: "/retos", accion: "Ver retos" });
   return items;

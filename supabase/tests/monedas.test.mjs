@@ -536,7 +536,227 @@ await test("un pago acreditado permite seguir operando: del bloqueo por saldo a 
   assert.equal(await saldo(u), 62 - 1);
 });
 
-// ── 8. Migración ────────────────────────────────────────────────────────────
+// ── 8. Panel de administración ──────────────────────────────────────────────
+console.log("\nPanel de administración de monedas");
+const admin = await persona("AdminMonedas", { monedas: 0 });
+await q("insert into public.app_admins (user_id) values ($1)", [admin]);
+const comoAdmin = (sql, params) => como(admin, sql, params);
+await test("todas las funciones admin_* rechazan a quien no es administrador (personas y anónimos)", async () => {
+  const u = await persona("NoAdmin");
+  const llamadas = [
+    ["select public.admin_coin_stats(30)", []],
+    ["select public.admin_coin_payments(null, 10, 0)", []],
+    ["select public.admin_update_price('order_place', 3, 1, true)", []],
+    ["select public.admin_update_package('mini', 'Recarga mini', 50, 50, null, true)", []],
+    ["select public.admin_set_setting('first_purchase_bonus_pct', 10)", []],
+    ["select public.admin_update_challenge('resenas_semana', 2, 25, true)", []],
+    ["select public.admin_find_user('ana')", []],
+    ["select public.admin_user_coins($1)", [u]],
+    ["select public.admin_adjust_coins($1, 10, 'prueba')", [u]],
+    ["select public.admin_grant_coins($1, 10, 'prueba')", [u]],
+    ["select public.admin_coin_log(10)", []],
+  ];
+  for (const [sql, params] of llamadas) {
+    await falla(como(u, sql, params), /Solo administradores/, sql);
+    await falla(como(null, sql, params), /permission denied|Solo administradores/, `anónimo: ${sql}`);
+  }
+  await falla(como(u, "select * from public.coin_admin_log"), /permission denied/);
+  await falla(como(u, "select public._admin_log('x', '{}'::jsonb)"), /permission denied/);
+  assert.equal(await saldo(u), 20, "nada de esto tocó el saldo");
+});
+await test("admin_coin_stats: ventas, compradores, circulación, origen y gasto de monedas cuadran con los datos", async () => {
+  const antes = (await comoAdmin("select public.admin_coin_stats(30) s"))[0].s;
+  const c1 = await persona("CompradorStats1", { monedas: 0 });
+  const c2 = await persona("CompradorStats2", { monedas: 0 });
+  const p1 = (await como(c1, "select public.create_coin_payment('plus', 'paypal') p"))[0].p;
+  await como("service", "select public.credit_coin_payment($1, 'paypal', 'ST-1', 150, '{}'::jsonb)", [p1.client_ref]);
+  const p2 = (await como(c1, "select public.create_coin_payment('mini', 'payphone') p"))[0].p;
+  await como("service", "select public.credit_coin_payment($1, 'payphone', 'ST-2', 50, '{}'::jsonb)", [p2.client_ref]);
+  const p3 = (await como(c2, "select public.create_coin_payment('pro', 'payphone') p"))[0].p;
+  await como("service", "select public.credit_coin_payment($1, 'payphone', 'ST-3', 350, '{}'::jsonb)", [p3.client_ref]);
+  const p4 = (await como(c2, "select public.create_coin_payment('mini', 'payphone') p"))[0].p;
+  await como("service", "select public.fail_coin_payment($1, 'cancelled')", [p4.client_ref]);
+  const p5 = (await como(c2, "select public.create_coin_payment('mini', 'paypal') p"))[0].p; // queda pendiente
+  assert.ok(p5.client_ref);
+  const provStats = await perfil(await persona("NegocioStats", { monedas: 100 }), { name: "Resto Stats", channels: ["local", "entrega"] });
+  const item = await articulo(provStats.id, "Sopa", 3);
+  const cli = await persona("ClienteStats", { monedas: 100 });
+  for (let i = 0; i < 4; i++) await pedir(cli, provStats.id, item); // el 4.º cuesta 1 moneda
+  const s = (await comoAdmin("select public.admin_coin_stats(30) s"))[0].s;
+  const d = (a, b) => a - b;
+  assert.deepEqual([d(s.ventas.pagos, antes.ventas.pagos), d(s.ventas.centavos, antes.ventas.centavos), d(s.ventas.monedas, antes.ventas.monedas)], [3, 550, (165 + 41) + 50 + (420 + 105)]);
+  assert.deepEqual([d(s.ventas.cancelados, antes.ventas.cancelados), d(s.ventas.pendientes, antes.ventas.pendientes)], [1, 1]);
+  assert.equal(d(s.compradores.total, antes.compradores.total), 2);
+  assert.ok(s.compradores.repetidores >= antes.compradores.repetidores + 1, "c1 compró dos veces");
+  assert.equal(s.emitidas.compras - (antes.emitidas.compras ?? 0), (165 + 41) + 50 + (420 + 105));
+  const gasto = (x) => x.gastadas.find((g) => g.accion === "order_place")?.monedas ?? 0;
+  assert.equal(gasto(s) - gasto(antes), 1, "el cuarto pedido costó 1 moneda");
+  assert.equal(s.circulacion, (await q("select sum(w.coins)::int n from public.wallets w join public.profiles p on p.id = w.user_id where not p.is_demo"))[0].n);
+  assert.equal(s.usuarios, (await q("select count(*)::int n from public.profiles where not is_demo"))[0].n);
+  assert.deepEqual(s.por_pasarela.map((x) => x.pasarela).sort(), ["paypal", "payphone"]);
+  assert.equal(s.diario.length, 30);
+  assert.equal(s.ajustes.first_purchase_bonus_pct, 25, "las estadísticas traen los ajustes numéricos");
+  assert.equal(s.diario.at(-1).centavos - (antes.diario.at(-1).centavos), 550, "todo se pagó hoy (hora de Ecuador)");
+  assert.equal(s.diario.reduce((n, x) => n + x.centavos, 0), s.ventas.centavos, "la serie diaria suma las ventas");
+  assert.equal((await comoAdmin("select public.admin_coin_stats(0) s"))[0].s.diario.length, 1, "días mínimos: 1");
+  assert.equal((await comoAdmin("select public.admin_coin_stats(9999) s"))[0].s.diario.length, 365, "días máximos: 365");
+});
+await test("admin_coin_payments: filtra por estado, pagina, trae persona y motivo del fallo", async () => {
+  const todos = (await comoAdmin("select public.admin_coin_payments(null, 100, 0) r"))[0].r;
+  assert.ok(todos.total >= 5 && todos.items.length === Math.min(todos.total, 100));
+  const pagados = (await comoAdmin("select public.admin_coin_payments('paid', 100, 0) r"))[0].r;
+  assert.ok(pagados.items.every((p) => p.estado === "paid" && p.ref_pasarela && p.paid_at && p.persona));
+  const u = await persona("FallaImporte", { monedas: 0 });
+  const p = (await como(u, "select public.create_coin_payment('pro', 'payphone') p"))[0].p;
+  await como("service", "select public.credit_coin_payment($1, 'payphone', 'MAL-1', 1, '{}'::jsonb)", [p.client_ref]);
+  const fallidos = (await comoAdmin("select public.admin_coin_payments('failed', 100, 0) r"))[0].r;
+  const fila = fallidos.items.find((x) => x.client_ref === p.client_ref);
+  assert.deepEqual([fila.estado, fila.motivo, fila.centavos, fila.persona], ["failed", "importe_distinto", 350, "FallaImporte"]);
+  const pag1 = (await comoAdmin("select public.admin_coin_payments(null, 2, 0) r"))[0].r;
+  const pag2 = (await comoAdmin("select public.admin_coin_payments(null, 2, 2) r"))[0].r;
+  assert.equal(pag1.items.length, 2);
+  assert.ok(!pag1.items.some((a) => pag2.items.some((b) => a.id === b.id)), "las páginas no se repiten");
+  assert.ok(pag1.items[0].created_at >= pag1.items[1].created_at, "lo más reciente primero");
+  await falla(comoAdmin("select public.admin_coin_payments('inventado', 10, 0)"), /Estado no válido/);
+});
+await test("PARIDAD: validarTarifa/Paquete/Reto/Bonificación/Ajuste de TypeScript aceptan lo mismo que las funciones de SQL", async () => {
+  const { validarTarifa, validarPaquete, validarReto, validarBonificacion, validarAjuste, dolaresACentavos, cantidadAjuste } = await import("@/lib/adminMonedas");
+  const contraSql = async (nombre, cliente, sql, params) => {
+    const clienteRechaza = Object.keys(cliente).length > 0;
+    let servidorRechaza = false;
+    try {
+      await comoAdmin(sql, params);
+    } catch {
+      servidorRechaza = true;
+    }
+    assert.equal(servidorRechaza, clienteRechaza, `«${nombre}»: cliente ${clienteRechaza ? "rechaza" : "acepta"}, servidor ${servidorRechaza ? "rechaza" : "acepta"}`);
+  };
+  for (const [nombre, b] of [["3 y 1", { gratis: "3", coste: "1" }], ["0 y 0", { gratis: "0", coste: "0" }], ["1000 y 100000", { gratis: "1000", coste: "100000" }], ["1001", { gratis: "1001", coste: "1" }], ["coste 100001", { gratis: "3", coste: "100001" }], ["negativo", { gratis: "-1", coste: "1" }], ["texto", { gratis: "tres", coste: "1" }], ["decimal", { gratis: "3", coste: "1.5" }], ["vacío", { gratis: "", coste: "" }]]) {
+    const e = validarTarifa(b);
+    const g = /^\d+$/.test(b.gratis) ? Number(b.gratis) : null;
+    const c = /^\d+$/.test(b.coste) ? Number(b.coste) : null;
+    await contraSql(`tarifa ${nombre}`, e, "select public.admin_update_price('order_place', $1, $2, true)", [g, c]);
+  }
+  await q("update public.coin_prices set free_uses = 3, cost = 1, active = true where action = 'order_place'");
+  const paquete = (extra = {}) => ({ id: "extra", etiqueta: "Paquete extra", precio: "2.50", monedas: "250", insignia: "", ...extra });
+  for (const [nombre, b] of [["ok", paquete()], ["id corto", paquete({ id: "x" })], ["id con mayúscula", paquete({ id: "Extra" })], ["id con número", paquete({ id: "extra1" })], ["nombre corto", paquete({ etiqueta: "A" })], ["nombre largo", paquete({ etiqueta: "a".repeat(41) })], ["precio 0.09", paquete({ precio: "0.09" })], ["precio 0.10", paquete({ precio: "0.10" })], ["precio 1000", paquete({ precio: "1000" })], ["precio 1000.01", paquete({ precio: "1000.01" })], ["precio con coma", paquete({ precio: "1,5" })], ["precio texto", paquete({ precio: "barato" })], ["0 monedas", paquete({ monedas: "0" })], ["1 000 000", paquete({ monedas: "1000000" })], ["1 000 001", paquete({ monedas: "1000001" })], ["insignia 31", paquete({ insignia: "a".repeat(31) })], ["insignia 30", paquete({ insignia: "a".repeat(30) })]]) {
+    const cents = dolaresACentavos(b.precio);
+    await contraSql(`paquete ${nombre}`, validarPaquete(b), "select public.admin_update_package($1, $2, $3, $4, $5, true)", [b.id, b.etiqueta, cents ?? -1, /^\d+$/.test(b.monedas) ? Number(b.monedas) : -1, b.insignia]);
+  }
+  await q("delete from public.coin_packages where id = 'extra'");
+  for (const [nombre, b] of [["ok", { meta: "2", premio: "25" }], ["meta 0", { meta: "0", premio: "25" }], ["meta 1000", { meta: "1000", premio: "25" }], ["meta 1001", { meta: "1001", premio: "25" }], ["premio 0", { meta: "2", premio: "0" }], ["premio 10000", { meta: "2", premio: "10000" }], ["premio 10001", { meta: "2", premio: "10001" }], ["texto", { meta: "dos", premio: "25" }]]) {
+    await contraSql(`reto ${nombre}`, validarReto(b), "select public.admin_update_challenge('resenas_semana', $1, $2, true)", [/^\d+$/.test(b.meta) ? Number(b.meta) : -1, /^\d+$/.test(b.premio) ? Number(b.premio) : -1]);
+  }
+  await q("update public.coin_challenges set target = 2, prize = 25, active = true where id = 'resenas_semana'");
+  for (const [nombre, t] of [["0", "0"], ["25", "25"], ["200", "200"], ["201", "201"], ["texto", "mucho"], ["negativo", "-5"]]) {
+    await contraSql(`bonificación ${nombre}`, validarBonificacion(t), "select public.admin_set_setting('first_purchase_bonus_pct', $1)", [/^\d+$/.test(t) ? Number(t) : -1]);
+  }
+  await q("update public.coin_settings set value = 25 where key = 'first_purchase_bonus_pct'");
+  const objetivo = await persona("AjusteParidad", { monedas: 5 });
+  for (const [nombre, b] of [["+50", { cantidad: "+50", motivo: "regalo de bienvenida" }], ["-3", { cantidad: "-3", motivo: "corrección" }], ["cero", { cantidad: "0", motivo: "corrección" }], ["+10000", { cantidad: "10000", motivo: "regalo" }], ["+10001", { cantidad: "10001", motivo: "regalo" }], ["sin motivo", { cantidad: "5", motivo: "  " }], ["motivo de 2", { cantidad: "5", motivo: "ok" }], ["texto", { cantidad: "cinco", motivo: "regalo" }]]) {
+    const n = /^[+-]?\d+$/.test(b.cantidad) ? cantidadAjuste(b.cantidad) : 0;
+    await contraSql(`ajuste ${nombre}`, validarAjuste(b), "select public.admin_adjust_coins($1, $2, $3)", [objetivo, n, b.motivo]);
+  }
+});
+await test("las tarifas, los paquetes, la bonificación y los retos cambian desde el panel y todo queda en el registro con antes y después", async () => {
+  const conAdmin = await q("select coalesce(max(id), 0)::int m from public.coin_admin_log");
+  const desde = conAdmin[0].m;
+  await comoAdmin("select public.admin_update_price('order_accept', 5, 7, true)");
+  assert.deepEqual((await q("select free_uses, cost from public.coin_prices where action = 'order_accept'"))[0], { free_uses: 5, cost: 7 });
+  await comoAdmin("select public.admin_update_price('order_accept', 3, 5, true)"); // restaura
+  await comoAdmin("select public.admin_update_package('mini', 'Recarga mini', 60, 55, 'Oferta', true)");
+  assert.deepEqual((await q("select price_cents, coins, badge from public.coin_packages where id = 'mini'"))[0], { price_cents: 60, coins: 55, badge: "Oferta" });
+  await comoAdmin("select public.admin_update_package('mini', 'Recarga mini', 50, 50, '', true)");
+  assert.equal((await q("select badge from public.coin_packages where id = 'mini'"))[0].badge, null, "una etiqueta vacía se guarda como nula");
+  await comoAdmin("select public.admin_update_package('nuevo', 'Recarga nueva', 100, 105, null, true)");
+  assert.deepEqual((await q("select sort, active from public.coin_packages where id = 'nuevo'"))[0], { sort: 40, active: true }, "un paquete nuevo va al final");
+  const nuevaCompra = await persona("CompraNueva", { monedas: 0 });
+  const pago = (await como(nuevaCompra, "select public.create_coin_payment('nuevo', 'paypal') p"))[0].p;
+  assert.deepEqual([pago.amount_cents, pago.coins], [100, 105 + 26], "el paquete nuevo ya se puede comprar (con la bonificación de la primera compra)");
+  await comoAdmin("select public.admin_update_package('nuevo', 'Recarga nueva', 100, 105, null, false)");
+  await falla(como(nuevaCompra, "select public.create_coin_payment('nuevo', 'paypal')"), /Paquete no disponible/);
+  await q("delete from public.coin_payments where package_id = 'nuevo'");
+  await q("delete from public.coin_packages where id = 'nuevo'");
+  await comoAdmin("select public.admin_set_setting('first_purchase_bonus_pct', 0)");
+  const sinBono = await persona("SinBono", { monedas: 0 });
+  assert.equal((await como(sinBono, "select public.create_coin_payment('mini', 'paypal') p"))[0].p.bonus_coins, 0, "bonificación 0 %: sin extra");
+  await comoAdmin("select public.admin_set_setting('first_purchase_bonus_pct', 25)");
+  await comoAdmin("select public.admin_update_challenge('evento_semana', 2, 12, false)");
+  assert.deepEqual((await q("select target, prize, active from public.coin_challenges where id = 'evento_semana'"))[0], { target: 2, prize: 12, active: false });
+  const u = await persona("VeRetos");
+  assert.ok(!(await como(u, "select public.community_challenges_status() r"))[0].r.some((r) => r.id === "evento_semana"), "un reto desactivado deja de mostrarse");
+  await comoAdmin("select public.admin_update_challenge('evento_semana', 1, 10, true)");
+  await falla(comoAdmin("select public.admin_update_price('no_existe', 3, 1, true)"), /Esa tarifa no existe/);
+  await falla(comoAdmin("select public.admin_update_challenge('no_existe', 1, 1, true)"), /Ese reto no existe/);
+  await falla(comoAdmin("select public.admin_set_setting('otra_cosa', 1)"), /Ese ajuste no existe/);
+  const log = (await comoAdmin("select public.admin_coin_log(200) l"))[0].l.filter((e) => e.id > desde);
+  const acciones = log.map((e) => e.accion);
+  for (const a of ["price", "package", "package_new", "setting", "challenge"]) assert.ok(acciones.includes(a), `falta «${a}» en el registro`);
+  const precio = log.find((e) => e.accion === "price" && e.detalle.despues.cost === 7);
+  assert.deepEqual([precio.detalle.antes, precio.detalle.despues, precio.admin], [{ free: 3, cost: 5, active: true }, { free: 5, cost: 7, active: true }, "AdminMonedas"]);
+  assert.ok(log.every((e, i) => i === 0 || log[i - 1].id > e.id), "el registro va del más reciente al más antiguo");
+});
+await test("cambiar un precio no altera un pago pendiente que ya tenía otro importe", async () => {
+  const u = await persona("PrecioViejo", { monedas: 0 });
+  const p = (await como(u, "select public.create_coin_payment('plus', 'payphone') p"))[0].p;
+  await comoAdmin("select public.admin_update_package('plus', 'Recarga plus', 200, 165, 'Más popular', true)");
+  const r = (await como("service", "select public.credit_coin_payment($1, 'payphone', 'VIEJO-1', 150, '{}'::jsonb) r", [p.client_ref]))[0].r;
+  assert.equal(r.ok, true, "se cobra el importe con el que se creó, no el nuevo");
+  await comoAdmin("select public.admin_update_package('plus', 'Recarga plus', 150, 165, 'Más popular', true)");
+});
+await test("buscar personas y ver su ficha de monedas: saldo, usos, pagos y movimientos (con email solo para el administrador)", async () => {
+  const x = await persona("Buscable");
+  await q("update auth.users set email = 'buscable.especial@test.dev' where id = $1", [x]);
+  for (const consulta of ["Buscable", "buscable.especial", x]) {
+    const r = (await comoAdmin("select public.admin_find_user($1) r", [consulta]))[0].r;
+    assert.ok(r.some((p) => p.id === x), `no se encontró con «${consulta}»`);
+  }
+  const fila = (await comoAdmin("select public.admin_find_user('buscable.especial') r"))[0].r[0];
+  assert.deepEqual([fila.email, fila.monedas], ["buscable.especial@test.dev", 20]);
+  await falla(comoAdmin("select public.admin_find_user('a')"), /al menos 2 caracteres/);
+  assert.deepEqual((await comoAdmin("select public.admin_find_user('%%%%') r"))[0].r, [], "los comodines de LIKE se buscan literalmente");
+  const prov = await perfil(await persona("DuenoFicha", { monedas: 50 }), { name: "Resto Ficha", channels: ["local", "entrega"] });
+  const item = await articulo(prov.id, "Té", 1);
+  for (let i = 0; i < 4; i++) await pedir(x, prov.id, item);
+  const pago = (await como(x, "select public.create_coin_payment('mini', 'paypal') p"))[0].p;
+  await como("service", "select public.credit_coin_payment($1, 'paypal', 'FICHA-1', 50, '{}'::jsonb)", [pago.client_ref]);
+  const f = (await comoAdmin("select public.admin_user_coins($1) f", [x]))[0].f;
+  assert.deepEqual([f.persona.email, f.persona.nombre, f.monedas, f.persona.demo], ["buscable.especial@test.dev", "Buscable", 20 - 1 + 62, false]);
+  assert.deepEqual(f.usos.find((u) => u.accion === "order_place"), { accion: "order_place", gratis: 3, pagados: 1, gastadas: 1 });
+  assert.deepEqual([f.pagos.length, f.pagos[0].estado, f.pagos[0].coins], [1, "paid", 62]);
+  assert.ok(f.movimientos.some((m) => m.motivo === "purchase:mini" && m.delta === 62) && f.movimientos.some((m) => m.motivo.startsWith("use:order_place") && m.delta === -1));
+  await falla(comoAdmin("select public.admin_user_coins($1)", [randomUUID()]), /Persona inexistente/);
+});
+await test("admin_adjust_coins: suma o resta con motivo, no deja el saldo en negativo y queda auditado; admin_grant_coins también", async () => {
+  const u = await persona("Ajustada", { monedas: 10 });
+  assert.equal((await comoAdmin("select public.admin_adjust_coins($1, 40, 'compensación por un fallo') n", [u]))[0].n, 50);
+  assert.equal(await saldo(u), 50);
+  assert.equal((await comoAdmin("select public.admin_adjust_coins($1, -15, 'devolución de un regalo por error') n", [u]))[0].n, 35);
+  assert.equal(await saldo(u), 35);
+  const e = await falla(comoAdmin("select public.admin_adjust_coins($1, -100, 'demasiado')", [u]), /solo tiene 35 monedas/);
+  assert.equal(e.code, "P0001");
+  assert.equal(await saldo(u), 35, "el intento fallido no cambió nada");
+  await falla(comoAdmin("select public.admin_adjust_coins($1, 0, 'nada')", [u]), /distinto de 0/);
+  await falla(comoAdmin("select public.admin_adjust_coins($1, 5, '')", [u]), /motivo/);
+  await falla(comoAdmin("select public.admin_adjust_coins($1, 5, 'un motivo válido')", [randomUUID()]), /Persona inexistente/);
+  const motivos = (await q("select delta, reason from public.wallet_ledger where user_id = $1 and reason like 'admin%' order by id", [u])).map((m) => [m.delta, m.reason]);
+  assert.deepEqual(motivos, [[40, "admin:compensación por un fallo"], [-15, "admin_debit:devolución de un regalo por error"]]);
+  await comoAdmin("select public.admin_grant_coins($1, 20, 'promoción')", [u]);
+  assert.equal(await saldo(u), 55);
+  const log = (await comoAdmin("select public.admin_coin_log(10) l"))[0].l;
+  assert.deepEqual(log.slice(0, 3).map((x) => [x.accion, x.detalle.delta]), [["grant", 20], ["adjust", -15], ["adjust", 40]]);
+  assert.equal(log[1].detalle.saldo_antes, 50);
+});
+await test("textoLog y textoMovimiento describen el registro y los ajustes en español", async () => {
+  const { textoLog } = await import("@/lib/adminMonedas");
+  const { textoMovimiento } = await import("@/lib/monedas");
+  const log = (await comoAdmin("select public.admin_coin_log(200) l"))[0].l;
+  for (const e of log) assert.ok(textoLog(e).length > 5 && !/undefined|\[object/.test(textoLog(e)), `${e.accion}: ${textoLog(e)}`);
+  assert.equal(textoMovimiento("admin_debit:por un error"), "Ajuste del equipo: por un error");
+  assert.equal(textoMovimiento("admin:promoción"), "Regalo: promoción");
+});
+
+// ── 9. Migración ────────────────────────────────────────────────────────────
 console.log("\nMigración");
 await test("MIGRACIÓN: update_010 sobre una base con 009 (dos veces) conserva pedidos y saldos, y empieza a cobrar", async () => {
   const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
@@ -588,6 +808,43 @@ await test("MIGRACIÓN: update_010 sobre una base con 009 (dos veces) conserva p
     const u10 = (await m.query("select free_used, paid_used from public.coin_usage where user_id = $1 and action = 'order_place'", [cliente])).rows[0];
     assert.deepEqual([u10.free_used, u10.paid_used], [3, 1], "los 3 usos gratis se cuentan desde la 010");
     assert.equal((await m.query("select coins from public.wallets where user_id = $1", [cliente])).rows[0].coins, saldoAntes - 1);
+  } finally {
+    await m.end();
+  }
+});
+
+await test("MIGRACIÓN: update_011 sobre una base con 010 (dos veces) crea el registro y las funciones del panel sin tocar los saldos", async () => {
+  const completo = fs.readFileSync(esquema, "utf8").replace(/\r\n/g, "\n");
+  const ini = completo.indexOf("-- ACTUALIZACION-011-INICIO");
+  const fin = completo.indexOf("-- ACTUALIZACION-011-FIN");
+  assert.ok(ini > 0 && fin > ini, "faltan los marcadores de la actualización 011 en schema.sql");
+  const actualizacion = fs.readFileSync(path.join(aqui, "..", "update_011_admin_monedas.sql"), "utf8").replace(/\r\n/g, "\n");
+  assert.equal(completo.slice(completo.indexOf("\n", ini) + 1, fin).trim(), actualizacion.trim(), "schema.sql y update_011 difieren");
+  await server.createDatabase("migracion11");
+  const m = new pg.Client({ ...conn, database: "migracion11" });
+  await m.connect();
+  m.on("notice", () => {});
+  try {
+    await m.query(fs.readFileSync(path.join(aqui, "bootstrap.sql"), "utf8").replace(/^create role .*$/gm, ""));
+    await m.query(completo.slice(0, ini)); // esquema base + 002 … + 010
+    await m.query("insert into auth.users (id, email, raw_user_meta_data) values (gen_random_uuid(), 'adm11@test.dev', '{\"full_name\":\"Admin Once\"}'), (gen_random_uuid(), 'per11@test.dev', '{\"full_name\":\"Persona Once\"}')");
+    const [adm, per] = (await m.query("select id from auth.users order by email")).rows.map((r) => r.id);
+    await m.query("insert into public.app_admins (user_id) values ($1)", [adm]);
+    const saldoAntes = (await m.query("select coins from public.wallets where user_id = $1", [per])).rows[0].coins;
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname = 'admin_coin_stats'")).rows[0].n, 0);
+    await m.query(actualizacion);
+    await m.query(actualizacion); // idempotente
+    assert.equal((await m.query("select count(*)::int n from pg_proc where proname in ('admin_coin_stats','admin_coin_payments','admin_update_price','admin_update_package','admin_set_setting','admin_update_challenge','admin_find_user','admin_user_coins','admin_adjust_coins','admin_grant_coins','admin_coin_log')")).rows[0].n, 11, "una sola versión de cada función");
+    assert.equal((await m.query("select coins from public.wallets where user_id = $1", [per])).rows[0].coins, saldoAntes);
+    await m.query("begin");
+    await m.query("set local role authenticated");
+    await m.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: adm, role: "authenticated" })]);
+    await m.query("select public.admin_adjust_coins($1, 12, 'prueba de migración')", [per]);
+    const stats = (await m.query("select public.admin_coin_stats(7) s")).rows[0].s;
+    await m.query("commit");
+    assert.equal(stats.diario.length, 7);
+    assert.equal((await m.query("select coins from public.wallets where user_id = $1", [per])).rows[0].coins, saldoAntes + 12);
+    assert.equal((await m.query("select count(*)::int n from public.coin_admin_log")).rows[0].n, 1);
   } finally {
     await m.end();
   }

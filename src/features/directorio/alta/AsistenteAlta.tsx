@@ -19,6 +19,7 @@ import {
 } from "@/lib/directorio/validacion";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
 import { subirMedia } from "@/lib/supabase/subida";
+import IconoMoneda from "@/components/IconoMoneda";
 
 const CLAVE_BORRADOR = "conectari:alta-negocio:v1";
 const FILAS_INICIALES = 3;
@@ -196,7 +197,7 @@ export default function AsistenteAlta() {
         <h1 ref={titulo} tabIndex={-1} className="mt-3 text-3xl font-black text-ink outline-none">
           ¡Tu negocio ya está publicado!
         </h1>
-        <p className="mt-2 text-slate-600">Cualquier persona de la ciudad ya puede encontrarte. Si es tu primer negocio, ganaste <strong>+30 🪙</strong>.</p>
+        <p className="mt-2 text-slate-600">Cualquier persona de la ciudad ya puede encontrarte. Si es tu primer negocio, ganaste <strong>+30 <IconoMoneda /></strong>.</p>
         {publicado.avisos.map((a) => (
           <p key={a} role="alert" className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
             {a}

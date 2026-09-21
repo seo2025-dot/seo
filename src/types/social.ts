@@ -1,3 +1,5 @@
+import type { Busca, Genero } from "@/lib/genero";
+
 export type Interes =
   | "roomie"
   | "inversor"
@@ -78,6 +80,8 @@ export interface Usuario {
   valores?: string[]; // los valores con los que se identifica (públicos)
   parejaIdealValores?: string[]; // privado: valores que busca en su pareja
   parejaIdealEstilo?: string[]; // privado: estilo de vida que busca en su pareja
+  genero?: Genero; // privado: solo el perfil propio
+  quiereConocer?: Busca; // privado: a quién quiere conocer (la plataforma solo recomienda a quienes encajan en los dos sentidos)
   codigoReferido?: string;
   // — Freelance —
   profesional?: Profesional;

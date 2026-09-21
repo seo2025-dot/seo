@@ -9,6 +9,8 @@ import { useSocial } from "@/context/SocialContext";
 import { tiempoRelativo } from "@/lib/social";
 import Avatar from "@/components/Avatar";
 import Icono, { type NombreIcono } from "@/components/Icono";
+import { TextoConMonedas } from "@/components/IconoMoneda";
+import RelojCiudad from "@/components/RelojCiudad";
 
 const esActivo = (pathname: string, href: string) => pathname === href || pathname.startsWith(`${href}/`);
 
@@ -74,7 +76,9 @@ function Notificaciones() {
               {estado.notificaciones.slice(0, 12).map((n) => {
                 const contenido = (
                   <>
-                    <p className="text-sm">{n.texto}</p>
+                    <p className="text-sm">
+                      <TextoConMonedas texto={n.texto} />
+                    </p>
                     <p className="mt-0.5 text-[11px] text-slate-400">{tiempoRelativo(n.ts)}</p>
                   </>
                 );
@@ -117,6 +121,7 @@ export default function Navbar() {
         </Link>
 
         <div className="flex items-center gap-1.5 sm:gap-2">
+          <RelojCiudad />
           {sesion.uid ? (
             <>
               <Link

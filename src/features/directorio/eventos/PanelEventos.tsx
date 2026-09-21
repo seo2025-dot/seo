@@ -7,6 +7,7 @@ import ControlAcceso from "@/features/directorio/eventos/ControlAcceso";
 import { useMisEventos, useMisOrganizadores, type EventoDelPanel } from "@/features/directorio/eventos/useEventosPanel";
 import { categoriaEvento, faseEvento, mensajeErrorEventos, ocupacion, resumenAsistentes, textoFechaCorta, textoPrecioEvento } from "@/lib/directorio/eventos";
 import { supabase } from "@/lib/supabaseClient";
+import IconoMoneda from "@/components/IconoMoneda";
 
 const FASE = {
   proximo: { texto: "Próximo", clase: "bg-emerald-50 text-emerald-700" },
@@ -124,7 +125,7 @@ export default function PanelEventos() {
             🎤
           </p>
           <p className="mt-3 font-bold text-ink">Primero crea tu perfil de organizador</p>
-          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">Es gratis y toma un par de minutos: nombre, zona y contacto. Después publicas todos los eventos que quieras. Ganas +30 🪙 con tu primer perfil.</p>
+          <p className="mx-auto mt-1 max-w-md text-sm text-slate-500">Es gratis y toma un par de minutos: nombre, zona y contacto. Después publicas todos los eventos que quieras. Ganas +30 <IconoMoneda /> con tu primer perfil.</p>
           <Link href="/directorio/mi-negocio/nuevo?seccion=eventos" className="boton-marca mt-5 inline-block rounded-full px-7 py-3 text-sm font-bold text-white">
             Crear mi perfil de organizador
           </Link>

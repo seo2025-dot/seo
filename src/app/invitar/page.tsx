@@ -20,6 +20,7 @@ import {
   siguienteNivel,
   urlInvitacion,
 } from "@/lib/referidos";
+import IconoMoneda, { TextoConMonedas } from "@/components/IconoMoneda";
 
 export default function InvitarPage() {
   const { estado, sesion, hidratado } = useSocial();
@@ -85,9 +86,13 @@ export default function InvitarPage() {
             <motion.div className="h-full rounded-full bg-gradient-to-r from-sun via-mango to-flame" initial={{ width: 0 }} animate={{ width: `${progresoCirculo(confirmados)}%` }} transition={{ duration: 0.8 }} />
           </div>
           <p className="mt-3 text-sm text-white/80">
-            {proximo
-              ? `Te faltan ${proximo.min - confirmados} para ser ${proximo.nombre} ${proximo.emoji}${hito ? ` · próximo bono: +${hito.bonus} 🪙 al llegar a ${hito.n}` : ""}.`
-              : "¡Completaste tu círculo! Eres un Faro para esta comunidad. 🎉"}
+            <TextoConMonedas
+              texto={
+                proximo
+                  ? `Te faltan ${proximo.min - confirmados} para ser ${proximo.nombre} ${proximo.emoji}${hito ? ` · próximo bono: +${hito.bonus} 🪙 al llegar a ${hito.n}` : ""}.`
+                  : "¡Completaste tu círculo! Eres un Faro para esta comunidad. 🎉"
+              }
+            />
           </p>
         </div>
       </header>
@@ -96,7 +101,7 @@ export default function InvitarPage() {
         <h2 id="enlace" className="text-lg font-black text-ink">
           Tu enlace personal
         </h2>
-        <p className="text-sm text-slate-500">Cada persona que entre con él y complete su perfil te suma {PREMIO_POR_INVITADO} 🪙 y recibe {BIENVENIDA_INVITADO} 🪙 de bienvenida.</p>
+        <p className="text-sm text-slate-500">Cada persona que entre con él y complete su perfil te suma {PREMIO_POR_INVITADO} <IconoMoneda /> y recibe {BIENVENIDA_INVITADO} <IconoMoneda /> de bienvenida.</p>
         <div className="mt-3 flex flex-col gap-2 sm:flex-row">
           <input readOnly value={cargando ? "Generando tu enlace…" : url} aria-label="Tu enlace de invitación" onFocus={(e) => e.currentTarget.select()} className="min-w-0 flex-1 rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-sm" />
           <button type="button" onClick={() => void copiar()} disabled={!stats} className="boton-marca rounded-xl px-5 py-2.5 text-sm font-bold text-white disabled:opacity-50">
@@ -122,7 +127,7 @@ export default function InvitarPage() {
             Correo
           </a>
         </div>
-        {stats && <p className="mt-3 text-xs text-slate-500">Has ganado {stats.coins_earned} 🪙 con tus invitaciones. Las monedas son virtuales y no tienen valor monetario.</p>}
+        {stats && <p className="mt-3 text-xs text-slate-500">Has ganado {stats.coins_earned} <IconoMoneda /> con tus invitaciones. Las monedas son virtuales y no tienen valor monetario.</p>}
       </section>
 
       <section aria-labelledby="hitos" className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -144,7 +149,7 @@ export default function InvitarPage() {
                   </p>
                   <p className="text-xs text-slate-600">{n.lema}</p>
                 </div>
-                <span className="shrink-0 text-xs font-bold text-slate-500">{bono ? `+${bono.bonus} 🪙` : alcanzado ? "✓" : ""}</span>
+                <span className="shrink-0 text-xs font-bold text-slate-500">{bono ? <>+{bono.bonus} <IconoMoneda /></> : alcanzado ? "✓" : ""}</span>
               </li>
             );
           })}

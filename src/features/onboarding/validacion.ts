@@ -1,4 +1,5 @@
 import type { ItemFoto } from "@/features/fotos/tipos";
+import { esBusca, esGenero, type Busca, type Genero } from "@/lib/genero";
 import { MAX_FOTOS } from "@/lib/media/config";
 import type { Interes, TipoRelacion } from "@/types/social";
 
@@ -7,6 +8,12 @@ export interface Borrador {
   usuario: string;
   nacimiento: string; // YYYY-MM-DD
   ubicacion: string;
+  /** Código de país (ISO de 2 letras). En Ecuador se eligen zonas de Cuenca; en el resto del mundo las zonas son opcionales. */
+  pais: string;
+  /** Se pregunta a todas las personas al inscribirse; privado (solo lo lee su dueña o dueño). */
+  genero: Genero | "";
+  /** A quién le gustaría conocer; privado. La plataforma solo recomienda a quienes encajan en los dos sentidos. */
+  quiereConocer: Busca | "";
   universidad: string;
   colegio: string;
   estatura: string; // cm, opcional (texto del input)
@@ -27,6 +34,9 @@ export const BORRADOR_VACIO: Borrador = {
   usuario: "",
   nacimiento: "",
   ubicacion: "",
+  pais: "EC",
+  genero: "",
+  quiereConocer: "",
   universidad: "",
   colegio: "",
   estatura: "",
@@ -81,6 +91,7 @@ export function validarBasico(b: Borrador, hoy = new Date()): Errores {
   else if (edad === null) e.nacimiento = "La fecha de nacimiento no es válida.";
   else if (edad < 18) e.nacimiento = "Debes tener 18 años o más para usar la plataforma.";
   else if (edad > 100) e.nacimiento = "La fecha de nacimiento no es válida.";
+  if (!esGenero(b.genero)) e.genero = "Cuéntanos si eres hombre o mujer (o elige «Prefiero no decirlo»).";
   if (b.universidad.trim().length < 2) e.universidad = "Indica la universidad a la que asististe (o la más reciente).";
   else if (b.universidad.trim().length > 120) e.universidad = "El nombre es demasiado largo (máx. 120).";
   if (b.colegio.trim().length < 2) e.colegio = "Indica el colegio al que asististe.";
@@ -102,6 +113,7 @@ export const MAX_PAREJA_IDEAL = 1000;
 
 export function validarPareja(b: Borrador): Errores {
   const e: Errores = {};
+  if (!esBusca(b.quiereConocer)) e.quiereConocer = "Elige a quién te gustaría conocer.";
   const largo = b.parejaIdeal.trim().length;
   if (largo < MIN_PAREJA_IDEAL) e.parejaIdeal = `Cuéntanos un poco más (mínimo ${MIN_PAREJA_IDEAL} caracteres): así podremos recomendarte mejor.`;
   else if (largo > MAX_PAREJA_IDEAL) e.parejaIdeal = `Máximo ${MAX_PAREJA_IDEAL} caracteres.`;
@@ -111,7 +123,8 @@ export function validarPareja(b: Borrador): Errores {
 export function validarIntereses(b: Borrador): Errores {
   const e: Errores = {};
   if (b.intereses.length === 0) e.intereses = "Elige al menos un interés.";
-  if (b.zonas.length === 0) e.zonas = "Elige al menos una zona.";
+  // Las zonas del catálogo son de Cuenca: fuera de Ecuador son opcionales para no obligar a nadie a elegir barrios de otra ciudad.
+  if ((b.pais || "EC") === "EC" && b.zonas.length === 0) e.zonas = "Elige al menos una zona.";
   return e;
 }
 

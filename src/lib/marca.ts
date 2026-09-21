@@ -28,6 +28,8 @@ export const SECUNDARIAS: Seccion[] = [
   { id: "recompensas", href: "/recompensas", etiqueta: "Ruleta", emoji: "🎡", degradado: "from-sun to-flame" },
   { id: "delivery", href: "/directorio/delivery", etiqueta: "Delivery", emoji: "🍔", degradado: "from-flame to-brand-500" },
   { id: "farmacias", href: "/directorio/salud", etiqueta: "Farmacias", emoji: "💊", degradado: "from-aqua to-cyan-700" },
+  { id: "taxis", href: "/directorio/movilidad", etiqueta: "Taxis", emoji: "🚖", degradado: "from-sun to-mango", oscuro: true },
+  { id: "eventos", href: "/directorio/eventos", etiqueta: "Eventos", emoji: "🎟️", degradado: "from-[#7a3cff] to-[#ff4d9d]" },
   { id: "explorar", href: "/explorar", etiqueta: "Explorar", emoji: "💞", degradado: "from-[#ff5a7a] to-brand-500" },
   { id: "retos", href: "/retos", etiqueta: "Retos", emoji: "🎯", degradado: "from-aqua to-cyan-700" },
   { id: "invitar", href: "/invitar", etiqueta: "Invitar", emoji: "🌱", degradado: "from-[#2fbf71] to-aqua" },

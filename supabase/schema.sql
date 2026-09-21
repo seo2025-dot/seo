@@ -4459,3 +4459,559 @@ revoke execute on function
   from public, anon, authenticated;
 
 -- ACTUALIZACION-010-FIN
+
+-- ACTUALIZACION-011-INICIO
+-- ============================================================================
+-- ACTUALIZACIÓN 011 · Panel de administración de monedas
+--
+-- · Si ya aplicaste schema.sql ANTES de esta actualización (con la 010): ejecuta SOLO este archivo (SQL Editor > Run).
+-- · Si vas a instalar desde cero: schema.sql ya incluye este contenido al final; no hace falta ejecutarlo aparte.
+-- Es idempotente: se puede ejecutar más de una vez.
+--
+-- Qué añade (todo solo para administradores: cada función comprueba `is_admin()` y, si no lo eres, falla con «Solo administradores»):
+--   · admin_coin_stats(): ventas, compradores, monedas en circulación, de dónde salen y en qué se gastan, y la serie diaria.
+--   · admin_coin_payments(): listado de pagos con filtro por estado y paginación.
+--   · admin_update_price / admin_update_package / admin_set_setting / admin_update_challenge: ajustar tarifas, paquetes, la bonificación de
+--     la primera compra y los retos SIN tocar SQL. Los cambios de precio solo afectan a compras nuevas (cada pago guarda su importe).
+--   · admin_find_user / admin_user_coins / admin_adjust_coins: buscar a una persona, ver su saldo, usos, pagos y movimientos, y sumar o
+--     restar monedas con un motivo.
+--   · coin_admin_log: registro de auditoría de TODO lo anterior (quién, qué y el antes y el después).
+-- ============================================================================
+
+-- ── 1. Registro de auditoría ────────────────────────────────────────────────
+create table if not exists public.coin_admin_log (
+  id         bigint generated always as identity primary key,
+  admin_id   uuid references public.profiles (id) on delete set null,
+  action     text not null,
+  detail     jsonb not null default '{}',
+  created_at timestamptz not null default now()
+);
+create index if not exists coin_admin_log_created_idx on public.coin_admin_log (created_at desc);
+alter table public.coin_admin_log enable row level security;
+revoke all on public.coin_admin_log from anon, authenticated;   -- solo se lee con admin_coin_log()
+
+create or replace function public._admin_log(p_action text, p_detail jsonb) returns void
+language sql security definer set search_path = public as $$
+  insert into public.coin_admin_log (admin_id, action, detail) values (auth.uid(), p_action, coalesce(p_detail, '{}'));
+$$;
+
+-- ── 2. Estadísticas ─────────────────────────────────────────────────────────
+-- Los días se cuentan en hora de Ecuador (UTC-5 fijo). `p_days` se limita a 1–365.
+create or replace function public.admin_coin_stats(p_days int default 30) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_dias int := greatest(1, least(coalesce(p_days, 30), 365));
+  v_hoy date := ((now() at time zone 'UTC') - interval '5 hours')::date;
+  v_desde date := v_hoy - (greatest(1, least(coalesce(p_days, 30), 365)) - 1);
+  v_since timestamptz := (v_desde::timestamp + interval '5 hours') at time zone 'UTC';
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  return jsonb_build_object(
+    'dias', v_dias,
+    'ventas', (select jsonb_build_object(
+        'pagos', count(*) filter (where status = 'paid'),
+        'centavos', coalesce(sum(amount_cents) filter (where status = 'paid'), 0),
+        'monedas', coalesce(sum(coins) filter (where status = 'paid'), 0),
+        'bonificadas', coalesce(sum(bonus_coins) filter (where status = 'paid'), 0),
+        'pendientes', count(*) filter (where status = 'pending'),
+        'fallidos', count(*) filter (where status = 'failed'),
+        'cancelados', count(*) filter (where status = 'cancelled'))
+      from public.coin_payments where created_at >= v_since),
+    'por_pasarela', coalesce((select jsonb_agg(jsonb_build_object('pasarela', provider, 'pagos', n, 'centavos', c) order by c desc)
+      from (select provider, count(*) n, sum(amount_cents) c from public.coin_payments where status = 'paid' and created_at >= v_since group by provider) t), '[]'),
+    'por_paquete', coalesce((select jsonb_agg(jsonb_build_object('paquete', package_id, 'pagos', n, 'centavos', c) order by c desc)
+      from (select package_id, count(*) n, sum(amount_cents) c from public.coin_payments where status = 'paid' and created_at >= v_since group by package_id) t), '[]'),
+    'compradores', jsonb_build_object(
+      'periodo', (select count(distinct user_id) from public.coin_payments where status = 'paid' and created_at >= v_since),
+      'total', (select count(distinct user_id) from public.coin_payments where status = 'paid'),
+      'repetidores', (select count(*) from (select user_id from public.coin_payments where status = 'paid' group by user_id having count(*) >= 2) r)),
+    'ajustes', (select coalesce(jsonb_object_agg(key, value), '{}') from public.coin_settings),
+    'usuarios', (select count(*) from public.profiles where not is_demo),
+    'circulacion', (select coalesce(sum(w.coins), 0) from public.wallets w join public.profiles p on p.id = w.user_id where not p.is_demo),
+    'emitidas', coalesce((select jsonb_object_agg(cat, total) from (
+        select cat, sum(delta) total from (
+          select case when reason like 'purchase:%' then 'compras'
+                      when reason like 'challenge:%' or reason like 'daily:%' or reason like 'mission:%' then 'retos'
+                      when reason in ('daily_checkin', 'wheel') then 'bonos'
+                      when reason like 'referral%' or reason = 'referred_welcome' then 'invitaciones'
+                      when reason like 'refund:%' then 'devoluciones'
+                      when reason like 'admin:%' then 'admin'
+                      else 'otros' end cat, delta
+            from public.wallet_ledger where delta > 0 and created_at >= v_since) x
+        group by cat) y), '{}'),
+    'gastadas', coalesce((select jsonb_agg(jsonb_build_object('accion', accion, 'monedas', m, 'usos', n) order by m desc) from (
+        select split_part(reason, ':', 2) accion, sum(-delta) m, count(*) n from public.wallet_ledger
+         where reason like 'use:%' and delta < 0 and created_at >= v_since group by 1) g), '[]'),
+    'diario', (select coalesce(jsonb_agg(jsonb_build_object('dia', d, 'centavos', coalesce(v.c, 0), 'pagos', coalesce(v.n, 0)) order by d), '[]')
+      from generate_series(v_desde, v_hoy, interval '1 day') g(d)
+      left join (select ((paid_at at time zone 'UTC') - interval '5 hours')::date dia, sum(amount_cents) c, count(*) n
+                   from public.coin_payments where status = 'paid' and paid_at >= v_since group by 1) v on v.dia = g.d::date));
+end $$;
+
+-- ── 3. Listado de pagos ─────────────────────────────────────────────────────
+create or replace function public.admin_coin_payments(p_status text default null, p_limit int default 50, p_offset int default 0) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_limit int := greatest(1, least(coalesce(p_limit, 50), 100));
+  v_offset int := greatest(0, coalesce(p_offset, 0));
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if p_status is not null and p_status not in ('pending', 'paid', 'failed', 'cancelled') then raise exception 'Estado no válido' using errcode = '22023'; end if;
+  return jsonb_build_object(
+    'total', (select count(*) from public.coin_payments where p_status is null or status = p_status),
+    'items', coalesce((select jsonb_agg(t) from (
+      select p.id, p.user_id, pr.display_name as persona, pr.handle, p.package_id as paquete, p.provider as pasarela, p.amount_cents as centavos, p.coins,
+             p.bonus_coins as bonificadas, p.status as estado, p.provider_ref as ref_pasarela, p.client_ref, p.created_at, p.paid_at, p.raw ->> 'motivo' as motivo
+        from public.coin_payments p join public.profiles pr on pr.id = p.user_id
+       where p_status is null or p.status = p_status
+       order by p.created_at desc limit v_limit offset v_offset) t), '[]'));
+end $$;
+
+-- ── 4. Ajustes de tarifas, paquetes, bonificación y retos ───────────────────
+create or replace function public.admin_update_price(p_action text, p_free int, p_cost int, p_active boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  antes public.coin_prices;
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  select * into antes from public.coin_prices where action = p_action;
+  if not found then raise exception 'Esa tarifa no existe' using errcode = 'P0002'; end if;
+  if p_free is null or p_free not between 0 and 1000 then raise exception 'Los usos gratis deben estar entre 0 y 1000' using errcode = '22023'; end if;
+  if p_cost is null or p_cost not between 0 and 100000 then raise exception 'El coste debe estar entre 0 y 100000 monedas' using errcode = '22023'; end if;
+  update public.coin_prices set free_uses = p_free, cost = p_cost, active = coalesce(p_active, active) where action = p_action;
+  perform public._admin_log('price', jsonb_build_object('action', p_action,
+    'antes', jsonb_build_object('free', antes.free_uses, 'cost', antes.cost, 'active', antes.active),
+    'despues', jsonb_build_object('free', p_free, 'cost', p_cost, 'active', coalesce(p_active, antes.active))));
+end $$;
+
+create or replace function public.admin_update_package(p_id text, p_label text, p_price_cents int, p_coins int, p_badge text, p_active boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  antes public.coin_packages;
+  v_label text := btrim(coalesce(p_label, ''));
+  v_badge text := nullif(btrim(coalesce(p_badge, '')), '');
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if p_id is null or p_id !~ '^[a-z_]{2,20}$' then raise exception 'El identificador solo admite letras minúsculas y guion bajo (2–20)' using errcode = '22023'; end if;
+  if char_length(v_label) not between 2 and 40 then raise exception 'El nombre debe tener entre 2 y 40 caracteres' using errcode = '22023'; end if;
+  if v_badge is not null and char_length(v_badge) > 30 then raise exception 'La etiqueta admite como máximo 30 caracteres' using errcode = '22023'; end if;
+  if p_price_cents is null or p_price_cents not between 10 and 100000 then raise exception 'El precio debe estar entre $0.10 y $1000.00' using errcode = '22023'; end if;
+  if p_coins is null or p_coins not between 1 and 1000000 then raise exception 'Las monedas deben estar entre 1 y 1000000' using errcode = '22023'; end if;
+  select * into antes from public.coin_packages where id = p_id;
+  insert into public.coin_packages (id, label, price_cents, coins, badge, active, sort)
+  values (p_id, v_label, p_price_cents, p_coins, v_badge, coalesce(p_active, true), coalesce((select max(sort) from public.coin_packages), 0) + 10)
+  on conflict (id) do update set label = excluded.label, price_cents = excluded.price_cents, coins = excluded.coins, badge = excluded.badge, active = coalesce(p_active, public.coin_packages.active);
+  perform public._admin_log(case when antes.id is null then 'package_new' else 'package' end, jsonb_build_object('id', p_id,
+    'antes', case when antes.id is null then null else jsonb_build_object('label', antes.label, 'price_cents', antes.price_cents, 'coins', antes.coins, 'badge', antes.badge, 'active', antes.active) end,
+    'despues', jsonb_build_object('label', v_label, 'price_cents', p_price_cents, 'coins', p_coins, 'badge', v_badge, 'active', coalesce(p_active, antes.active, true))));
+end $$;
+
+create or replace function public.admin_set_setting(p_key text, p_value int) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  v_antes int;
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if p_key not in ('first_purchase_bonus_pct') then raise exception 'Ese ajuste no existe' using errcode = 'P0002'; end if;
+  if p_value is null or p_value not between 0 and 200 then raise exception 'La bonificación debe estar entre 0 y 200 %%' using errcode = '22023'; end if;
+  select value into v_antes from public.coin_settings where key = p_key;
+  insert into public.coin_settings (key, value) values (p_key, p_value) on conflict (key) do update set value = excluded.value;
+  perform public._admin_log('setting', jsonb_build_object('key', p_key, 'antes', v_antes, 'despues', p_value));
+end $$;
+
+create or replace function public.admin_update_challenge(p_id text, p_target int, p_prize int, p_active boolean) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  antes public.coin_challenges;
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  select * into antes from public.coin_challenges where id = p_id;
+  if not found then raise exception 'Ese reto no existe' using errcode = 'P0002'; end if;
+  if p_target is null or p_target not between 1 and 1000 then raise exception 'La meta debe estar entre 1 y 1000' using errcode = '22023'; end if;
+  if p_prize is null or p_prize not between 1 and 10000 then raise exception 'El premio debe estar entre 1 y 10000 monedas' using errcode = '22023'; end if;
+  update public.coin_challenges set target = p_target, prize = p_prize, active = coalesce(p_active, active) where id = p_id;
+  perform public._admin_log('challenge', jsonb_build_object('id', p_id,
+    'antes', jsonb_build_object('target', antes.target, 'prize', antes.prize, 'active', antes.active),
+    'despues', jsonb_build_object('target', p_target, 'prize', p_prize, 'active', coalesce(p_active, antes.active))));
+end $$;
+
+-- ── 5. Personas: buscar, ver y ajustar saldo ────────────────────────────────
+create or replace function public.admin_find_user(p_q text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare
+  v_q text := btrim(coalesce(p_q, ''));
+  v_pat text;
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if char_length(v_q) < 2 then raise exception 'Escribe al menos 2 caracteres' using errcode = '22023'; end if;
+  v_pat := '%' || replace(replace(replace(v_q, '\', '\\'), '%', '\%'), '_', '\_') || '%';
+  return coalesce((select jsonb_agg(t) from (
+    select p.id, p.display_name as nombre, p.handle, u.email, coalesce(w.coins, 0) as monedas
+      from public.profiles p join auth.users u on u.id = p.id left join public.wallets w on w.user_id = p.id
+     where p.display_name ilike v_pat or p.handle ilike v_pat or u.email ilike v_pat or p.id::text = v_q
+     order by p.display_name limit 8) t), '[]');
+end $$;
+
+create or replace function public.admin_user_coins(p_user uuid) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if not exists (select 1 from public.profiles where id = p_user) then raise exception 'Persona inexistente' using errcode = 'P0002'; end if;
+  return jsonb_build_object(
+    'persona', (select jsonb_build_object('id', p.id, 'nombre', p.display_name, 'handle', p.handle, 'email', u.email, 'verificada', p.identity_verified, 'demo', p.is_demo)
+                  from public.profiles p join auth.users u on u.id = p.id where p.id = p_user),
+    'monedas', coalesce((select coins from public.wallets where user_id = p_user), 0),
+    'usos', coalesce((select jsonb_agg(jsonb_build_object('accion', action, 'gratis', free_used, 'pagados', paid_used, 'gastadas', spent) order by action)
+                        from public.coin_usage where user_id = p_user), '[]'),
+    'pagos', coalesce((select jsonb_agg(t) from (
+                select id, package_id as paquete, provider as pasarela, amount_cents as centavos, coins, status as estado, created_at
+                  from public.coin_payments where user_id = p_user order by created_at desc limit 10) t), '[]'),
+    'movimientos', coalesce((select jsonb_agg(t) from (
+                select delta, reason as motivo, created_at from public.wallet_ledger where user_id = p_user order by created_at desc, id desc limit 30) t), '[]'));
+end $$;
+
+-- Suma (o resta, con signo negativo) monedas con un motivo obligatorio. Queda en el historial de la persona y en el registro de auditoría.
+create or replace function public.admin_adjust_coins(p_user uuid, p_delta int, p_reason text) returns int
+language plpgsql security definer set search_path = public as $$
+declare
+  v_reason text := btrim(coalesce(p_reason, ''));
+  v_saldo int;
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if p_delta is null or p_delta = 0 or abs(p_delta) > 10000 then raise exception 'El ajuste debe ser distinto de 0 y de 10000 monedas como máximo' using errcode = '22023'; end if;
+  if char_length(v_reason) < 3 then raise exception 'Indica el motivo del ajuste' using errcode = '22023'; end if;
+  if not exists (select 1 from public.profiles where id = p_user) then raise exception 'Persona inexistente' using errcode = 'P0002'; end if;
+  select coins into v_saldo from public.wallets where user_id = p_user for update;
+  if p_delta > 0 then
+    perform public._earn(p_user, p_delta, 'admin:' || left(v_reason, 60));
+  else
+    if coalesce(v_saldo, 0) < -p_delta then raise exception 'La persona solo tiene % monedas', coalesce(v_saldo, 0) using errcode = 'P0001'; end if;
+    perform public._spend(p_user, -p_delta, 'admin_debit:' || left(v_reason, 60));
+  end if;
+  perform public._admin_log('adjust', jsonb_build_object('user', p_user, 'delta', p_delta, 'motivo', left(v_reason, 120), 'saldo_antes', v_saldo));
+  return coalesce(v_saldo, 0) + p_delta;
+end $$;
+
+-- El regalo de la 010 también queda auditado (misma firma: la sustituye).
+create or replace function public.admin_grant_coins(p_user uuid, p_amount int, p_reason text) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  if p_amount is null or p_amount not between 1 and 10000 then raise exception 'La cantidad debe estar entre 1 y 10000' using errcode = '22023'; end if;
+  perform public._earn(p_user, p_amount, 'admin:' || left(coalesce(nullif(btrim(p_reason), ''), 'regalo'), 60));
+  perform public._admin_log('grant', jsonb_build_object('user', p_user, 'delta', p_amount, 'motivo', left(coalesce(p_reason, ''), 120)));
+end $$;
+
+-- ── 6. Registro de auditoría (lectura) ──────────────────────────────────────
+create or replace function public.admin_coin_log(p_limit int default 40) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if not public.is_admin() then raise exception 'Solo administradores' using errcode = '42501'; end if;
+  return coalesce((select jsonb_agg(t) from (
+    select l.id, l.action as accion, l.detail as detalle, l.created_at, pr.display_name as admin
+      from public.coin_admin_log l left join public.profiles pr on pr.id = l.admin_id
+     order by l.created_at desc, l.id desc limit greatest(1, least(coalesce(p_limit, 40), 200))) t), '[]');
+end $$;
+
+-- ── 7. Permisos ─────────────────────────────────────────────────────────────
+grant execute on function
+  public.admin_coin_stats(int), public.admin_coin_payments(text, int, int), public.admin_update_price(text, int, int, boolean),
+  public.admin_update_package(text, text, int, int, text, boolean), public.admin_set_setting(text, int), public.admin_update_challenge(text, int, int, boolean),
+  public.admin_find_user(text), public.admin_user_coins(uuid), public.admin_adjust_coins(uuid, int, text), public.admin_grant_coins(uuid, int, text),
+  public.admin_coin_log(int)
+  to authenticated;
+revoke execute on function public._admin_log(text, jsonb) from public, anon, authenticated;
+
+-- ACTUALIZACION-011-FIN
+
+-- ACTUALIZACION-012-INICIO
+-- ============================================================================
+-- ACTUALIZACIÓN 012 · Geolocalización e internacionalización: país en perfiles y negocios, ubicación aproximada privada y búsqueda por país
+--
+-- · Si ya aplicaste schema.sql ANTES de esta actualización (con la 011): ejecuta SOLO este archivo (SQL Editor > Run).
+-- · Si vas a instalar desde cero: schema.sql ya incluye este contenido al final; no hace falta ejecutarlo aparte.
+-- Es idempotente: se puede ejecutar más de una vez.
+--
+-- Qué añade:
+--   · profiles.country (código ISO de 2 letras): es PÚBLICO (lo ven todas las personas; solo dice el país).
+--   · user_private.city / lat / lng / timezone: la ubicación APROXIMADA (2 decimales ≈ 1 km) de la persona. Solo su dueña o dueño la lee
+--     (user_private ya solo se lee con `user_id = auth.uid()`). Se escribe únicamente con set_my_location() y se borra con clear_my_location().
+--   · providers.country (por defecto EC): en qué país está el negocio. Se puede fijar al crear o editar el perfil.
+--   · search_providers() acepta `p_country` para listar solo los negocios de un país (junto con p_lat/p_lng ya ordenaba por cercanía).
+-- ============================================================================
+
+-- ── 1. País en perfiles y negocios ──────────────────────────────────────────
+alter table public.profiles add column if not exists country text check (country is null or country ~ '^[A-Z]{2}$');
+alter table public.providers add column if not exists country text not null default 'EC' check (country ~ '^[A-Z]{2}$');
+create index if not exists providers_country_idx on public.providers (country, vertical) where status = 'active';
+grant insert (country), update (country) on public.providers to authenticated;
+
+-- ── 2. Ubicación aproximada y privada ───────────────────────────────────────
+alter table public.user_private
+  add column if not exists city text check (city is null or char_length(city) <= 60),
+  add column if not exists lat numeric(5,2) check (lat is null or lat between -90 and 90),
+  add column if not exists lng numeric(5,2) check (lng is null or lng between -180 and 180),
+  add column if not exists timezone text check (timezone is null or (char_length(timezone) <= 64 and timezone ~ '^[A-Za-z_]+(/[A-Za-z_+0-9-]+){1,2}$')),
+  add column if not exists geo_updated timestamptz;
+
+create or replace function public.set_my_location(p_country text, p_city text, p_lat numeric, p_lng numeric, p_timezone text) returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null then raise exception 'No autenticado' using errcode = '28000'; end if;
+  if p_country is null or p_country !~ '^[A-Z]{2}$' then raise exception 'País no válido' using errcode = '22023'; end if;
+  if p_lat is null or p_lng is null or p_lat not between -90 and 90 or p_lng not between -180 and 180 then raise exception 'Coordenadas no válidas' using errcode = '22023'; end if;
+  if p_timezone is null or char_length(p_timezone) > 64 or p_timezone !~ '^[A-Za-z_]+(/[A-Za-z_+0-9-]+){1,2}$' then raise exception 'Zona horaria no válida' using errcode = '22023'; end if;
+  if char_length(coalesce(p_city, '')) > 60 then raise exception 'La ciudad admite como máximo 60 caracteres' using errcode = '22023'; end if;
+  update public.profiles set country = p_country where id = me;
+  -- Se guarda redondeada a 2 decimales (≈ 1,1 km) aunque el cliente envíe más precisión.
+  insert into public.user_private (user_id, city, lat, lng, timezone, geo_updated)
+  values (me, nullif(btrim(coalesce(p_city, '')), ''), round(p_lat, 2), round(p_lng, 2), p_timezone, now())
+  on conflict (user_id) do update set city = excluded.city, lat = excluded.lat, lng = excluded.lng, timezone = excluded.timezone, geo_updated = excluded.geo_updated;
+end $$;
+
+create or replace function public.clear_my_location() returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+begin
+  if me is null then raise exception 'No autenticado' using errcode = '28000'; end if;
+  update public.profiles set country = null where id = me;
+  update public.user_private set city = null, lat = null, lng = null, timezone = null, geo_updated = null where user_id = me;
+end $$;
+
+-- ── 3. Búsqueda por país (mismo contrato; un parámetro más al final) ────────
+drop function if exists public.search_providers(text, text, text, text, boolean, boolean, boolean, boolean, numeric, numeric, int, int);
+create or replace function public.search_providers(
+  p_vertical text, p_subtype text default null, p_zone text default null, p_q text default null,
+  p_open_now boolean default false, p_delivers boolean default false, p_verified boolean default false, p_on_duty boolean default false,
+  p_lat numeric default null, p_lng numeric default null, p_limit int default 24, p_offset int default 0,
+  p_country text default null
+) returns table (
+  id uuid, slug text, vertical text, subtype text, name text, description text, zone text, logo_url text, cover_url text,
+  channels text[], open_now boolean, on_duty boolean, verified boolean, rating numeric, reviews_count int,
+  delivery_fee numeric, min_order numeric, distance_km numeric, boosted boolean
+)
+language sql stable security definer set search_path = public as $$
+  with base as (
+    select p.*,
+           public._is_open(p.hours, p.open_24h) as v_open,
+           exists (select 1 from public.provider_duty_shifts d where d.provider_id = p.id and now() >= d.starts_at and now() < d.ends_at) as v_duty,
+           public._km(p_lat, p_lng, p.lat, p.lng) as v_km
+      from public.providers p
+     where p.status = 'active'
+       and p.vertical = p_vertical
+       and (p_country is null or p.country = p_country)
+       and (p_subtype is null or p.subtype = p_subtype)
+       and (p_zone is null or p_zone = '' or p.zone ilike p_zone)
+       and (p_q is null or btrim(p_q) = '' or public._norm(p.name) like public._like_pattern(p_q)
+            or public._norm(p.description) like public._like_pattern(p_q))
+       and (not p_delivers or 'entrega' = any (p.channels))
+       and (not p_verified or p.verified_at is not null)
+  )
+  select b.id, b.slug, b.vertical, b.subtype, b.name, b.description, b.zone, b.logo_url, b.cover_url, b.channels,
+         b.v_open, b.v_duty, b.verified_at is not null, b.rating, b.reviews_count, b.delivery_fee, b.min_order, b.v_km,
+         coalesce(b.boosted_until > now(), false)
+    from base b
+   where (not p_open_now or b.v_open) and (not p_on_duty or b.v_duty)
+   order by (b.v_duty and b.verified_at is not null) desc,
+            coalesce(b.boosted_until > now(), false) desc,
+            b.v_km asc nulls last,
+            (b.verified_at is not null) desc, b.rating desc, b.reviews_count desc, b.created_at desc
+   limit greatest(1, least(coalesce(p_limit, 24), 60)) offset greatest(0, coalesce(p_offset, 0));
+$$;
+
+-- ── 4. Permisos ─────────────────────────────────────────────────────────────
+grant execute on function
+  public.search_providers(text, text, text, text, boolean, boolean, boolean, boolean, numeric, numeric, int, int, text)
+  to anon, authenticated;
+grant execute on function public.set_my_location(text, text, numeric, numeric, text), public.clear_my_location() to authenticated;
+
+-- ACTUALIZACION-012-FIN
+
+-- ACTUALIZACION-013-INICIO
+-- ============================================================================
+-- ACTUALIZACIÓN 013 · Género y a quién quiere conocer cada persona (la plataforma se adapta a sus intereses)
+--
+-- · Si ya aplicaste schema.sql ANTES de esta actualización (con la 012): ejecuta SOLO este archivo (SQL Editor > Run).
+-- · Si vas a instalar desde cero: schema.sql ya incluye este contenido al final; no hace falta ejecutarlo aparte.
+-- Es idempotente: se puede ejecutar más de una vez.
+--
+-- Qué añade:
+--   · user_private.gender ('hombre' | 'mujer' | 'no_dice'): PRIVADO, solo lo lee su dueña o dueño. Se pregunta al inscribirse.
+--   · user_private.interested_in ('hombres' | 'mujeres' | 'todos'): a quién quiere conocer. También privado.
+--   · complete_onboarding() exige ambos datos a quien se inscribe (las personas que ya estaban inscritas no se ven afectadas).
+--   · recommend_people() solo muestra a quienes encajan en los DOS sentidos: yo quiero conocerles y ellas/ellos quieren conocerme.
+--     Quien aún no indicó su preferencia (personas anteriores a esta actualización) ve a todos; quien busca algo concreto solo ve a quien indicó ese género,
+--     así que conviene que las personas ya inscritas completen su género (la interfaz se lo pide).
+--   · people_i_may_meet(): los ids de las personas que encajan en ambos sentidos, para filtrar la baraja de /citas sin revelar el género de nadie.
+-- ============================================================================
+
+-- ── 1. Columnas privadas ────────────────────────────────────────────────────
+alter table public.user_private
+  add column if not exists gender text check (gender is null or gender in ('hombre', 'mujer', 'no_dice')),
+  add column if not exists interested_in text check (interested_in is null or interested_in in ('hombres', 'mujeres', 'todos'));
+grant update (gender, interested_in) on public.user_private to authenticated;
+
+-- ── 2. ¿Encaja el género de la otra persona con lo que yo busco? ────────────
+-- Sin preferencia (null) o «todos» encaja cualquiera, incluso quien no dijo su género.
+create or replace function public._seek_ok(p_seek text, p_gender text) returns boolean
+language sql immutable as $$
+  select p_seek is null or p_seek = 'todos' or (p_seek = 'hombres' and p_gender = 'hombre') or (p_seek = 'mujeres' and p_gender = 'mujer');
+$$;
+revoke execute on function public._seek_ok(text, text) from public, anon, authenticated;
+
+-- ── 3. Personas que encajan en ambos sentidos (solo ids: el género no se revela) ──
+create or replace function public.people_i_may_meet() returns setof uuid
+language sql stable security definer set search_path = public as $$
+  select p.id
+    from public.profiles p
+    join public.user_private up on up.user_id = p.id
+    left join public.user_private yo on yo.user_id = auth.uid()
+   where auth.uid() is not null
+     and p.id <> auth.uid()
+     and public._seek_ok(yo.interested_in, up.gender)
+     and public._seek_ok(up.interested_in, yo.gender);
+$$;
+revoke execute on function public.people_i_may_meet() from public, anon;
+grant execute on function public.people_i_may_meet() to authenticated;
+
+-- ── 4. La inscripción pregunta género y a quién quiere conocer ──────────────
+create or replace function public.complete_onboarding() returns void
+language plpgsql security definer set search_path = public as $$
+declare
+  me uuid := auth.uid();
+  p public.profiles;
+begin
+  if me is null then raise exception 'No autenticado' using errcode = '28000'; end if;
+  select * into p from public.profiles where id = me;
+  if p.display_name is null or char_length(btrim(p.display_name)) < 2 or p.display_name = 'Nuevo usuario' then
+    raise exception 'onboarding: falta tu nombre' using errcode = 'P0001';
+  end if;
+  if p.handle is null then raise exception 'onboarding: falta tu nombre de usuario' using errcode = 'P0001'; end if;
+  if not exists (select 1 from public.user_private where user_id = me and birth_date is not null) then
+    raise exception 'onboarding: falta tu fecha de nacimiento' using errcode = 'P0001';
+  end if;
+  if p.university is null or btrim(p.university) = '' then
+    raise exception 'onboarding: falta tu universidad' using errcode = 'P0001';
+  end if;
+  if p.school is null or btrim(p.school) = '' then
+    raise exception 'onboarding: falta tu colegio' using errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.user_private where user_id = me and char_length(btrim(coalesce(ideal_partner, ''))) >= 20) then
+    raise exception 'onboarding: describe a tu pareja ideal (mínimo 20 caracteres)' using errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.profile_photos where user_id = me) then
+    raise exception 'onboarding: sube al menos una foto' using errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.user_private where user_id = me and gender is not null) then
+    raise exception 'onboarding: cuéntanos si eres hombre o mujer' using errcode = 'P0001';
+  end if;
+  if not exists (select 1 from public.user_private where user_id = me and interested_in is not null) then
+    raise exception 'onboarding: elige a quién te gustaría conocer' using errcode = 'P0001';
+  end if;
+  update public.profiles set onboarding_completed = true where id = me;
+  perform public._reward_referral(me);
+end $$;
+
+-- ── 5. Las recomendaciones respetan lo que cada persona busca ───────────────
+create or replace function public.recommend_people(
+  p_min_age int default null, p_max_age int default null,
+  p_min_height int default null, p_max_height int default null,
+  p_limit int default 24, p_offset int default 0
+) returns table (person_id uuid, score int, reasons text[], pct_values int, pct_lifestyle int, pct_relation int)
+language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
+declare
+  me uuid := auth.uid();
+  v_me public.profiles;
+  v_ideal text[];
+  v_mydoc text[];
+  v_iv text[];
+  v_il text[];
+  v_mv text[];
+  v_ml text[];
+  v_mr text[];
+  v_gender text;
+  v_seek text;
+begin
+  if me is null then raise exception 'No autenticado' using errcode = '28000'; end if;
+  select * into v_me from public.profiles where id = me;
+  select public._lex(ideal_partner), public._tags(ideal_values), public._tags(ideal_lifestyle)
+    into v_ideal, v_iv, v_il
+    from public.user_private where user_id = me;
+  select gender, interested_in into v_gender, v_seek from public.user_private where user_id = me;
+  v_ideal := coalesce(v_ideal, '{}');
+  v_iv := coalesce(v_iv, '{}');
+  v_il := coalesce(v_il, '{}');
+  v_mydoc := public._doc_lex(v_me);
+  v_mv := public._tags(v_me.core_values);
+  v_ml := public._tags(v_me.lifestyle);
+  v_mr := public._tags(v_me.relations);
+
+  return query
+  with cand as (
+    select p.id as pid, p.university, p.school, p.interests, p.zones, p.sign,
+           public._doc_lex(p) as doc_lex, public._lex(up.ideal_partner) as ideal_lex,
+           public._tags(p.core_values) as t_val, public._tags(up.ideal_values) as t_ival,
+           public._tags(p.lifestyle) as t_life, public._tags(up.ideal_lifestyle) as t_ilife,
+           public._tags(p.relations) as t_rel
+      from public.profiles p
+      join public.user_private up on up.user_id = p.id
+     where p.id <> me
+       and p.onboarding_completed
+       and public._seek_ok(v_seek, up.gender)      -- a quién quiero conocer yo
+       and public._seek_ok(up.interested_in, v_gender) -- y a quién quiere conocer la otra persona
+       and (p_min_age is null or p.age >= p_min_age)
+       and (p_max_age is null or p.age <= p_max_age)
+       and (p_min_height is null or p.height_cm >= p_min_height)
+       and (p_max_height is null or p.height_cm <= p_max_height)
+       and not exists (select 1 from public.person_swipes s where s.from_user = me and s.to_user = p.id and s.action = 'pass')
+  ), calc as (
+    select c.pid,
+      (select count(*)::int from unnest(v_ideal) x where x = any (c.doc_lex))    as hits,
+      (select count(*)::int from unnest(c.ideal_lex) x where x = any (v_mydoc))  as rhits,
+      cardinality(c.ideal_lex) as their_n,
+      (v_me.university is not null and c.university is not null and public._norm(v_me.university) = public._norm(c.university)) as same_uni,
+      (v_me.school is not null and c.school is not null and public._norm(v_me.school) = public._norm(c.school)) as same_school,
+      cardinality(array(select unnest(c.interests) intersect select unnest(v_me.interests))) as n_int,
+      (c.zones && v_me.zones) as same_zone,
+      public._afinidad(v_iv, v_mv, c.t_ival, c.t_val)                 as p_val,
+      public._afinidad(v_il, v_ml, c.t_ilife, c.t_life)               as p_life,
+      public._afinidad('{}'::text[], v_mr, '{}'::text[], c.t_rel)     as p_rel,
+      case when c.sign is not null and v_me.sign is not null then public.astral_score(v_me.sign, c.sign, 'pareja') end as astral
+      from cand c
+  ), scored as (
+    select k.pid, k.hits, k.p_val, k.p_life, k.p_rel,
+      least(100,
+          case when cardinality(v_ideal) = 0 then 0 else round(25 * least(1, k.hits::numeric / greatest(1, least(4, cardinality(v_ideal))))) end
+        + case when k.their_n = 0 then 0 else round(10 * least(1, k.rhits::numeric / greatest(1, least(4, k.their_n)))) end
+        + round(coalesce(k.p_val, 0) * 0.15)
+        + round(coalesce(k.p_life, 0) * 0.12)
+        + round(coalesce(k.p_rel, 0) * 0.10)
+        + case when k.same_uni then 6 else 0 end
+        + case when k.same_school then 3 else 0 end
+        + least(2, k.n_int) * 3
+        + case when k.same_zone then 6 else 0 end
+        + round(coalesce(k.astral, 0) * 0.07)
+      )::int as pts,
+      array_remove(array[
+        case when k.hits > 0 then 'Encaja con ' || k.hits || case when k.hits = 1 then ' rasgo' else ' rasgos' end || ' de tu pareja ideal' end,
+        case when coalesce(k.p_val, 0) >= 50 then 'Valores afines' end,
+        case when k.same_uni then 'Comparten universidad' end,
+        case when k.same_school then 'Fueron al mismo colegio' end,
+        case when k.n_int > 0 then 'Intereses en común' end,
+        case when coalesce(k.p_life, 0) >= 50 then 'Estilo de vida afín' end,
+        case when k.same_zone then 'Misma zona' end,
+        case when coalesce(k.p_rel, 0) >= 50 then 'Buscan lo mismo' end,
+        case when coalesce(k.astral, 0) >= 75 then 'Gran afinidad astral' end
+      ], null) as why
+      from calc k
+  )
+  select s.pid, s.pts, s.why, s.p_val, s.p_life, s.p_rel from scored s
+   order by s.pts desc, s.pid
+   limit greatest(1, least(coalesce(p_limit, 24), 60)) offset greatest(0, coalesce(p_offset, 0));
+end $$;
+
+-- ACTUALIZACION-013-FIN

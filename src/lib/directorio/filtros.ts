@@ -1,4 +1,5 @@
 import { VERTICAL_POR_ID, type VerticalId } from "@/data/directorio";
+import { coordenadasValidas, redondearCoordenada } from "@/lib/geo";
 
 export const TAM_PAGINA = 24;
 const MAX_PAGINA = 200;
@@ -12,6 +13,10 @@ export interface FiltrosLista {
   entrega: boolean;
   verificados: boolean;
   deTurno: boolean;
+  /** «Cerca de mí»: coordenadas aproximadas (2 decimales, ≈1 km) y país. Solo van en la URL si la persona lo pide. */
+  lat?: number;
+  lng?: number;
+  pais?: string;
   pagina: number;
 }
 
@@ -32,7 +37,12 @@ export function filtrosDesdeParams(sp: Parametros, vertical: VerticalId): Filtro
   const pagina = Number.parseInt(primero(sp.pagina) ?? "1", 10);
   const q = texto(sp.q, 60);
   const zona = texto(sp.zona, 80);
+  const lat = Number(primero(sp.lat));
+  const lng = Number(primero(sp.lng));
+  const cerca = primero(sp.lat) !== undefined && primero(sp.lng) !== undefined && coordenadasValidas(lat, lng);
+  const pais = /^[A-Z]{2}$/.test(primero(sp.pais) ?? "") ? primero(sp.pais) : undefined;
   return {
+    ...(cerca ? { lat: redondearCoordenada(lat), lng: redondearCoordenada(lng), ...(pais ? { pais } : {}) } : {}),
     ...(subtipo ? { subtipo } : {}),
     ...(q ? { q } : {}),
     ...(zona ? { zona } : {}),
@@ -54,6 +64,11 @@ export function consultaDesdeFiltros(f: FiltrosLista): string {
   if (f.entrega) p.set("entrega", "1");
   if (f.verificados) p.set("verificados", "1");
   if (f.deTurno) p.set("turno", "1");
+  if (f.lat !== undefined && f.lng !== undefined) {
+    p.set("lat", String(f.lat));
+    p.set("lng", String(f.lng));
+    if (f.pais) p.set("pais", f.pais);
+  }
   if (f.pagina > 1) p.set("pagina", String(f.pagina));
   const s = p.toString();
   return s ? `?${s}` : "";
@@ -77,6 +92,9 @@ export function argumentosBusqueda(vertical: VerticalId, f: FiltrosLista) {
     p_delivers: f.entrega,
     p_verified: f.verificados,
     p_on_duty: f.deTurno,
+    p_lat: f.lat ?? null,
+    p_lng: f.lng ?? null,
+    p_country: f.pais ?? null,
     p_limit: TAM_PAGINA + 1,
     p_offset: (f.pagina - 1) * TAM_PAGINA,
   };
@@ -84,7 +102,7 @@ export function argumentosBusqueda(vertical: VerticalId, f: FiltrosLista) {
 
 /** Cuántos filtros están activos (sin contar la página). */
 export const filtrosActivos = (f: FiltrosLista) =>
-  [f.subtipo, f.q, f.zona, f.abierto, f.entrega, f.verificados, f.deTurno].filter(Boolean).length;
+  [f.subtipo, f.q, f.zona, f.abierto, f.entrega, f.verificados, f.deTurno, f.lat !== undefined].filter(Boolean).length;
 
 /** Sanea el texto del buscador universal: recorta, colapsa espacios y limita la longitud. Menos de 2 caracteres = sin búsqueda. */
 export function consultaUniversal(bruto: string | string[] | undefined): string {
