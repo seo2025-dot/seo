@@ -7,6 +7,7 @@ import { useReferidos } from "@/features/conexion/hooks";
 import { formatearCuentaAtras, useCuentaAtras } from "@/components/FomoBadges";
 import { BIENVENIDA_INVITADO, mensajeInvitacion, nivelDe, PREMIO_POR_INVITADO, progresoCirculo, siguienteHito, urlInvitacion } from "@/lib/referidos";
 import { msHastaReinicio, RETOS } from "@/lib/retos";
+import IconoMoneda from "@/components/IconoMoneda";
 
 const PREMIO_RETO = RETOS.find((r) => r.id === "invitar")?.premio ?? 30;
 
@@ -28,10 +29,10 @@ export default function InvitarCTA({ className = "" }: { className?: string }) {
     <>
       <p className="text-xs font-bold uppercase tracking-wider text-sun">🎁 Invita y gana monedas</p>
       <h2 className="mt-1 text-xl font-black leading-tight">
-        +{PREMIO_POR_INVITADO} 🪙 por cada amistad que se une contigo
+        +{PREMIO_POR_INVITADO} <IconoMoneda /> por cada amistad que se une contigo
       </h2>
       <p className="mt-1 text-sm text-white/75">
-        Tu invitada o invitado recibe {BIENVENIDA_INVITADO} 🪙 de bienvenida al completar su perfil, y tu estatus en la comunidad crece.
+        Tu invitada o invitado recibe {BIENVENIDA_INVITADO} <IconoMoneda /> de bienvenida al completar su perfil, y tu estatus en la comunidad crece.
       </p>
     </>
   );
@@ -71,7 +72,7 @@ export default function InvitarCTA({ className = "" }: { className?: string }) {
 
       {restante !== null && (
         <p className="mt-3 rounded-xl bg-white/10 px-3 py-2 text-xs text-white/85">
-          ⏳ Reto de hoy: si alguien entra con tu enlace y completa su perfil, ganas <strong className="text-sun">+{PREMIO_RETO} 🪙 más</strong>. Termina en{" "}
+          ⏳ Reto de hoy: si alguien entra con tu enlace y completa su perfil, ganas <strong className="text-sun">+{PREMIO_RETO} <IconoMoneda /> más</strong>. Termina en{" "}
           <span className="font-bold tabular-nums text-white">{formatearCuentaAtras(restante)}</span>.
         </p>
       )}
@@ -108,7 +109,7 @@ export default function InvitarCTA({ className = "" }: { className?: string }) {
           <dt className="text-[10px] text-white/60">Con perfil completo</dt>
         </div>
         <div className="rounded-xl bg-white/10 p-2">
-          <dd className="text-xl font-black tabular-nums text-sun">{stats?.coins_earned ?? 0} 🪙</dd>
+          <dd className="text-xl font-black tabular-nums text-sun">{stats?.coins_earned ?? 0} <IconoMoneda /></dd>
           <dt className="text-[10px] text-white/60">Ganadas</dt>
         </div>
       </dl>
@@ -120,7 +121,7 @@ export default function InvitarCTA({ className = "" }: { className?: string }) {
           </span>
           {hito && (
             <span>
-              Próximo bono: <strong className="text-sun">+{hito.bonus} 🪙</strong> a las {hito.n}
+              Próximo bono: <strong className="text-sun">+{hito.bonus} <IconoMoneda /></strong> a las {hito.n}
             </span>
           )}
         </div>

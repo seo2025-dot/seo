@@ -50,6 +50,8 @@ export default function Home() {
     { ...POR_ID.busco, texto: "Publica tu presupuesto", chip: `${buscando} búsquedas` },
     { ...POR_ID.delivery, texto: "Comida a domicilio de tu barrio", chip: chipDirectorio(conteos.delivery, "negocios") },
     { ...POR_ID.farmacias, texto: "Farmacias de turno y salud", chip: chipDirectorio(conteos.salud, "establecimientos") },
+    { ...POR_ID.taxis, texto: "Viajes y encomiendas, pide ofertas", chip: chipDirectorio(conteos.movilidad, "conductores") },
+    { ...POR_ID.eventos, texto: "Cartelera y entradas con QR", chip: chipDirectorio(conteos.eventos, "organizadores") },
     { ...POR_ID.explorar, texto: "Personas afines, con filtros", chip: "Motor de afinidad" },
     { ...POR_ID.citas, texto: "Pareja, amistad o roomies", chip: "Match astral" },
     { ...POR_ID.retos, texto: "Gana monedas cada día", chip: "Retos diarios" },
@@ -99,7 +101,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5">
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-6">
             {secundarias.map((m, i) => (
               <motion.div key={m.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 + 0.04 * i }}>
                 <Link href={m.href} className="tarjeta-viva flex h-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3">

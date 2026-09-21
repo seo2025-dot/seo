@@ -4,6 +4,7 @@ import { useCallback, useState } from "react";
 import { AvisoAccion, claseInput, fechaHora, llamarAdmin, useAccion } from "@/features/monedas/admin/util";
 import { ETIQUETA_ESTADO_PAGO, cantidadAjuste, etiquetaAccionUso, validarAjuste, type FichaMonedasPersona, type PersonaEncontrada } from "@/lib/adminMonedas";
 import { PASARELAS, dolares, textoMovimiento, type Pasarela } from "@/lib/monedas";
+import IconoMoneda from "@/components/IconoMoneda";
 
 /** Soporte: busca a una persona (nombre, @usuario, correo o id), mira su saldo, usos, pagos y movimientos, y ajusta su saldo con un motivo. */
 export default function TabPersonas() {
@@ -81,7 +82,7 @@ export default function TabPersonas() {
                     {p.handle} · {p.email}
                   </span>
                 </span>
-                <span className="shrink-0 font-black tabular-nums text-brand-700">🪙 {p.monedas}</span>
+                <span className="shrink-0 font-black tabular-nums text-brand-700"><IconoMoneda /> {p.monedas}</span>
               </button>
             </li>
           ))}
@@ -102,7 +103,7 @@ export default function TabPersonas() {
               <p className="mt-1 break-all font-mono text-[11px] text-white/40">{ficha.persona.id}</p>
             </div>
             <div className="text-right">
-              <p className="text-4xl font-black tabular-nums text-sun">🪙 {ficha.monedas}</p>
+              <p className="text-4xl font-black tabular-nums text-sun"><IconoMoneda /> {ficha.monedas}</p>
               <button type="button" onClick={() => setFicha(null)} className="mt-1 text-xs font-semibold text-white/70 underline">
                 Volver a los resultados
               </button>
@@ -152,7 +153,7 @@ export default function TabPersonas() {
                     <li key={u.accion} className="flex items-center justify-between gap-3 p-3">
                       <span className="text-slate-700">{etiquetaAccionUso(u.accion)}</span>
                       <span className="text-right text-xs text-slate-500">
-                        {u.gratis} gratis · {u.pagados} de pago · <strong className="text-ink">{u.gastadas} 🪙</strong>
+                        {u.gratis} gratis · {u.pagados} de pago · <strong className="text-ink">{u.gastadas} <IconoMoneda /></strong>
                       </span>
                     </li>
                   ))}

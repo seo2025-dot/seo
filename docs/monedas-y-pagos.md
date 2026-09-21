@@ -111,7 +111,7 @@ historial de la persona (`admin:…` / `admin_debit:…`) y en el registro; el c
 `supabase/tests/monedas.test.mjs` (38, PostgreSQL real): tarifas, 3 gratis y cobro desde el cuarto en cada acción, devoluciones, mensajes de citas
 (paridad TypeScript↔SQL), destacar, regalos de admin, retos (progreso, cobro único, semana siguiente), tienda (importe fijado por el servidor, solo
 `service_role` acredita, idempotencia, importes falsos, referencias repetidas) el panel de administración (permisos, estadísticas que cuadran con los datos, paridad de las validaciones, auditoría) y las migraciones 010 y 011.
-`supabase/tests/pagos.test.mjs` (38): forma exacta de cada llamada a PayPhone y PayPal, acreditación solo con lo confirmado, firma del webhook,
+`supabase/tests/pagos.test.mjs` (40): forma exacta de cada llamada a PayPhone y PayPal, acreditación solo con lo confirmado, firma del webhook,
 configuración y lógica de monedas de la interfaz.
 
 ## 6. Qué hace falta para cobrar de verdad

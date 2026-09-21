@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { VERTICAL_POR_ID, type Vertical, type VerticalId } from "@/data/directorio";
 import { ZONAS } from "@/data/catalogos";
+import IconoMoneda from "@/components/IconoMoneda";
 
 /** Tarjeta de una sección en el hub. Las que aún no tienen interfaz se muestran como «Muy pronto». */
 export function TarjetaSeccion({ v, negocios, verificados }: { v: Vertical; negocios?: number; verificados?: number }) {
@@ -81,7 +82,7 @@ export function InvitacionAlta({ vertical, className = "" }: { vertical?: string
         Aparece gratis ante toda la ciudad
       </h2>
       <p className="mt-2 max-w-xl text-sm text-white/75">
-        Sube tu menú o tus productos, tu horario y tu WhatsApp en menos de 5 minutos. Sin comisiones y sin esperar aprobación. Ganas <strong className="text-sun">+30 🪙</strong> al publicar tu primer perfil.
+        Sube tu menú o tus productos, tu horario y tu WhatsApp en menos de 5 minutos. Sin comisiones y sin esperar aprobación. Ganas <strong className="text-sun">+30 <IconoMoneda /></strong> al publicar tu primer perfil.
       </p>
       <ol className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
         {["Elige tu categoría", "Cuéntanos cómo atiendes", "Sube tu menú y publica"].map((p, i) => (
@@ -107,7 +108,7 @@ function InvitacionOrganizador({ href, className }: { href: string; className: s
         Publica tu evento y reserva entradas gratis
       </h2>
       <p className="mt-2 max-w-xl text-sm text-white/75">
-        Crea tu perfil de organizador una vez y publica todos tus eventos: con fecha, lugar, tipos de entrada y cupo. La gente reserva desde el celular, recibe su código QR y tú controlas el acceso en la puerta. Sin comisiones. Ganas <strong className="text-sun">+30 🪙</strong> con tu primer perfil.
+        Crea tu perfil de organizador una vez y publica todos tus eventos: con fecha, lugar, tipos de entrada y cupo. La gente reserva desde el celular, recibe su código QR y tú controlas el acceso en la puerta. Sin comisiones. Ganas <strong className="text-sun">+30 <IconoMoneda /></strong> con tu primer perfil.
       </p>
       <ol className="mt-4 grid gap-2 text-sm sm:grid-cols-3">
         {["Crea tu perfil de organizador", "Publica tu evento con sus entradas", "Valida los códigos en la puerta"].map((p, i) => (

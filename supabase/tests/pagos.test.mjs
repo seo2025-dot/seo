@@ -6,6 +6,8 @@
  * (importe y referencia de la respuesta, nunca de la URL), la firma del webhook de PayPal, la idempotencia y la configuración.
  */
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import {
   BONO_PRIMERA_COMPRA_PCT, PAQUETES_DEFECTO, PRECIOS_DEFECTO, ahorroFrente, bonoPrimeraCompra, costeMensaje, detalleSaldo, dolares, esMensajeDeMonedas, esSaldoInsuficiente, estadoUso, mensajeSaldoInsuficiente,
   mensajesHastaCobro, textoCoste, textoMonedas, textoMovimiento,
@@ -440,6 +442,46 @@ await test("dolaresACentavos, validarPaquete, validarAjuste y mensajeErrorAdmin"
   assert.equal(mensajeErrorAdmin("La persona solo tiene 35 monedas"), "La persona solo tiene 35 monedas");
   assert.match(mensajeErrorAdmin("Could not find the function public.admin_coin_stats"), /actualización 011/);
   assert.equal(mensajeErrorAdmin("otra cosa"), "otra cosa");
+});
+
+// ── Icono de moneda ─────────────────────────────────────────────────────────
+console.log("\nIcono de moneda");
+await test("el emoji 🪙 (Unicode 13) no se pinta directamente en ninguna pantalla: Windows 10 lo muestra como un cuadrado vacío", () => {
+  const raiz = path.resolve("src");
+  const permitidos = new Set(["components/IconoMoneda.tsx", "app/invitar/page.tsx", "context/SocialContext.tsx", "features/monedas/Piezas.tsx"]);
+  const infractores = [];
+  const recorrer = (d) => {
+    for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) recorrer(p);
+      else if (p.endsWith(".tsx")) {
+        const rel = path.relative(raiz, p).replace(/\\/g, "/");
+        if (fs.readFileSync(p, "utf8").includes("🪙") && !permitidos.has(rel)) infractores.push(rel);
+      }
+    }
+  };
+  recorrer(raiz);
+  assert.deepEqual(infractores, [], "usa <IconoMoneda /> en vez del emoji");
+  // Los pocos archivos permitidos lo usan solo en cadenas que pasan por <TextoConMonedas> (o en comentarios)
+  for (const rel of ["app/invitar/page.tsx", "context/SocialContext.tsx", "features/monedas/Piezas.tsx"]) {
+    const t = fs.readFileSync(path.join(raiz, rel), "utf8");
+    assert.ok(t.includes("TextoConMonedas"), `${rel} debe mostrar esas cadenas con TextoConMonedas`);
+  }
+  for (const rel of ["components/Navbar.tsx", "components/AvisoVivo.tsx"]) assert.ok(fs.readFileSync(path.join(raiz, rel), "utf8").includes("TextoConMonedas"), `${rel}: las notificaciones de la base de datos pueden traer 🪙`);
+});
+await test("IconoMoneda es un SVG accesible que hereda el tamaño del texto, y TextoConMonedas sustituye cada 🪙 de un texto", async () => {
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const React = (await import("react")).default;
+  globalThis.React = React; // tsx compila el JSX con React.createElement (tsconfig usa «preserve» para Next)
+  const { default: IconoMoneda, TextoConMonedas } = await import("@/components/IconoMoneda");
+  const decorativo = renderToStaticMarkup(React.createElement(IconoMoneda));
+  assert.match(decorativo, /^<svg [^>]*viewBox="0 0 24 24"[^>]*width="1em"[^>]*height="1em"[^>]*aria-hidden="true"/);
+  assert.ok(!decorativo.includes("🪙") && !/<script|onload|href=/i.test(decorativo));
+  assert.match(renderToStaticMarkup(React.createElement(IconoMoneda, { titulo: "Monedas" })), /role="img"[^>]*aria-label="Monedas"|aria-label="Monedas"[^>]*role="img"/);
+  const html = renderToStaticMarkup(React.createElement(TextoConMonedas, { texto: "🪙 Necesitas 5 monedas. Ganas +30 🪙." }));
+  assert.equal((html.match(/<svg/g) ?? []).length, 2, "un icono por cada 🪙");
+  assert.ok(!html.includes("🪙") && html.includes("Necesitas 5 monedas") && html.includes("+30"));
+  assert.equal(renderToStaticMarkup(React.createElement(TextoConMonedas, { texto: "Sin monedas" })), "Sin monedas");
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);

@@ -45,6 +45,7 @@ import {
   mapearSolicitud,
 } from "@/lib/supabase/mapeo";
 import { subirKyc, subirMedia, subirVarias } from "@/lib/supabase/subida";
+import { TextoConMonedas } from "@/components/IconoMoneda";
 
 // ───────────────────────────── Tipos públicos ─────────────────────────────
 
@@ -1549,7 +1550,9 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
       {children}
       {aviso && (
         <div role="status" className="fixed bottom-24 left-1/2 z-[200] flex max-w-[90vw] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full bg-slate-900 px-5 py-3 text-sm text-white shadow-xl lg:bottom-8">
-          <span>{aviso}</span>
+          <span>
+            <TextoConMonedas texto={aviso} />
+          </span>
           {esMensajeDeMonedas(aviso) && (
             <a href="/monedas" className="font-bold text-sun underline underline-offset-2">
               Recargar o ganar monedas

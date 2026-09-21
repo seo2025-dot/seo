@@ -366,6 +366,10 @@ await test("integración: los alias de next.config.ts coinciden con el catálogo
   const marca = fs.readFileSync(new URL("../../src/lib/marca.ts", import.meta.url), "utf8");
   assert.match(marca, /id: "delivery", href: "\/directorio\/delivery"/);
   assert.match(marca, /id: "farmacias", href: "\/directorio\/salud"/);
+  assert.match(marca, /id: "taxis", href: "\/directorio\/movilidad"/);
+  assert.match(marca, /id: "eventos", href: "\/directorio\/eventos"/);
+  const portada = fs.readFileSync(new URL("../../src/app/page.tsx", import.meta.url), "utf8");
+  for (const id of ["delivery", "farmacias", "taxis", "eventos"]) assert.ok(portada.includes(`POR_ID.${id}`), `la portada no muestra la tarjeta de ${id}`);
   const home = fs.readFileSync(new URL("../../src/app/page.tsx", import.meta.url), "utf8");
   assert.match(home, /<BuscadorUniversal \/>/, "la portada usa el buscador universal");
   const buscador = fs.readFileSync(new URL("../../src/components/BuscadorUniversal.tsx", import.meta.url), "utf8");

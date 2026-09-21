@@ -9,6 +9,7 @@ import { useOportunidad, useRetos } from "@/features/conexion/hooks";
 import { itemsOportunidad } from "@/lib/mensajes";
 import { META_CIRCULO } from "@/lib/referidos";
 import { msHastaReinicio, resumenRetos } from "@/lib/retos";
+import IconoMoneda from "@/components/IconoMoneda";
 
 /**
  * Panel de la portada para quien ya tiene sesión: lo que de verdad está pendiente hoy (datos reales), el avance de los retos
@@ -74,7 +75,7 @@ export default function PanelHoy({ compacto = false }: { compacto?: boolean }) {
             <div className="flex items-center justify-between text-sm">
               <span className="font-bold text-ink">🎯 Retos de hoy</span>
               <span className="tabular-nums text-slate-500">
-                {r.hechos}/{r.total} · quedan {r.monedasEnJuego} 🪙
+                {r.hechos}/{r.total} · quedan {r.monedasEnJuego} <IconoMoneda />
               </span>
             </div>
             <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={r.hechos} aria-valuemin={0} aria-valuemax={r.total}>
