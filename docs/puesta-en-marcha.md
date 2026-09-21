@@ -1,7 +1,6 @@
 # Puesta en marcha: que todo funcione y te llegue el correo cuando alguien se registre
 
-Son 4 pasos. Hazlos **en este orden** (primero la base de datos, después publicar la app: la app nueva usa columnas que la base de datos
-antigua no tiene).
+Son 4 pasos. Hazlos **en este orden** (primero la base de datos, después publicar la app: la app nueva usa columnas que la base de datos antigua no tiene).
 
 ## 1. Base de datos (Supabase) — 1 minuto
 
@@ -17,24 +16,29 @@ antigua no tiene).
    ```
    Si no devuelve filas es que todavía no te has registrado con ese correo: regístrate en la plataforma y vuelve a ejecutarlo.
 
-## 2. Claves del servidor — 3 minutos
+## 2. Claves del servidor (Hostinger) — 3 minutos
 
-En el hosting donde está publicada la app (normalmente **Vercel** → tu proyecto → *Settings* → *Environment Variables*) añade estas cuatro variables
-(marca *Production*):
+En [hPanel](https://hpanel.hostinger.com) abre tu sitio (la aplicación Node.js) → **Environment variables** (en el menú lateral). Las variables valen para la
+compilación y para la app en marcha, y se conservan entre publicaciones ([documentación de Hostinger](https://docs.hostinger.com/node.js/environment-variables)).
+
+**Lo más fácil:** en el proyecto hay un archivo **`.env.hostinger`** ya preparado (git lo ignora: nunca se sube). Rellena a mano las dos líneas que quedan
+vacías y pulsa **Import .env** en Hostinger:
 
 | Variable | Valor |
 |---|---|
-| `RESEND_API_KEY` | la clave de Resend (empieza por `re_`) |
-| `ADMIN_ALERT_EMAIL` | `estudiosbarterrubio@hotmail.com` |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → **service_role** (secreta: solo aquí, nunca en el código ni en el chat) |
-| `NEXT_PUBLIC_SITE_URL` | la dirección de tu web, p. ej. `https://conectari.com` |
+| `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` | ya vienen en el archivo |
+| `RESEND_API_KEY`, `ADMIN_ALERT_EMAIL` | ya vienen en el archivo |
+| `NEXT_PUBLIC_SITE_URL` | la dirección de tu web, p. ej. `https://conectari.com` (sin barra final) |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase → Project Settings → API → **service_role** (secreta: solo aquí; nunca en el código ni en el chat) |
 
-Las dos que ya usa la app (`NEXT_PUBLIC_SUPABASE_URL` y `NEXT_PUBLIC_SUPABASE_ANON_KEY`) deben seguir ahí.
+Después de cambiar variables hay que **volver a publicar** (paso 3): las que empiezan por `NEXT_PUBLIC_` se incorporan al compilar.
 
 ## 3. Publicar la versión nueva
 
-Fusiona la rama `feat/directorio-pedidos` en `main` (en GitHub: *Pull requests* → *New pull request* → *Create* → *Merge*). Vercel publica solo en
-un par de minutos. Si añadiste o cambiaste variables en el paso 2, hace falta esa publicación para que las tomen.
+1. En GitHub fusiona la rama `feat/directorio-pedidos` en `main` (*Pull requests* → *New pull request* → *Create* → *Merge*).
+2. En hPanel comprueba que tu sitio publica la rama `main` (*Settings & Redeploy*) y pulsa **Redeploy** si no arrancó solo. Tarda unos minutos.
+3. Si tras publicar ves la página anterior, en hPanel desactiva o vacía la caché/CDN del sitio (una vez): las respuestas antiguas guardadas pueden seguir
+   apareciendo. Ver también `docs/renderizado-y-errores.md`.
 
 ## 4. Comprobarlo
 
