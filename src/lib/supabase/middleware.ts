@@ -17,6 +17,7 @@ const PROTEGIDAS = [
   "/empleos/publicar",
   "/directorio/mi-negocio",
   "/directorio/pedidos",
+  "/directorio/solicitudes",
   "/admin",
   "/onboarding",
 ];

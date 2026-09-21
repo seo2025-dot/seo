@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { VERTICAL_POR_ID, etiquetaSubtipo, type VerticalId } from "@/data/directorio";
-import { AvisoConfiguracion, EstadoVacio, InvitacionAlta } from "@/features/directorio/Bloques";
+import { AvisoConfiguracion, EstadoVacio, InvitacionAlta, InvitacionSolicitud } from "@/features/directorio/Bloques";
 import FiltrosListado from "@/features/directorio/FiltrosLista";
 import TarjetaProveedor from "@/features/directorio/TarjetaProveedor";
 import { filtrosActivos, filtrosDesdeParams, hrefLista } from "@/lib/directorio/filtros";
@@ -39,7 +39,7 @@ export default async function ListadoPage({ params, searchParams }: { params: Pa
           {v.emoji}
         </p>
         <h1 className="mt-4 text-3xl font-black text-ink">{v.etiqueta}: muy pronto</h1>
-        <p className="mt-2 text-slate-600">{v.lema}. Estamos empezando por Delivery y Farmacias; esta sección llegará después.</p>
+        <p className="mt-2 text-slate-600">{v.lema}. Esta sección llegará en una próxima fase.</p>
         <Link href="/directorio" className="boton-marca mt-6 inline-block rounded-full px-7 py-3 text-sm font-bold text-white">
           Ver el directorio
         </Link>
@@ -65,6 +65,8 @@ export default async function ListadoPage({ params, searchParams }: { params: Pa
         </h1>
         <p className="mt-1 max-w-2xl text-slate-600">{v.lema}.</p>
       </header>
+
+      <InvitacionSolicitud vertical={vertical} className="mb-6" />
 
       <FiltrosListado vertical={vertical} filtros={filtros} />
 

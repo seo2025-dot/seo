@@ -78,6 +78,11 @@ export default function PanelMisNegocios() {
           <p className="text-slate-500">Los negocios que publicaste en el directorio.</p>
         </div>
         <div className="flex flex-wrap gap-2">
+          {negocios.some((n) => n.vertical === "movilidad" || n.vertical === "hogar" || n.vertical === "mascotas") && (
+            <Link href="/directorio/solicitudes" className="rounded-full border border-slate-300 px-6 py-2.5 text-sm font-bold text-ink hover:border-brand-400">
+              🙋 Solicitudes
+            </Link>
+          )}
           {negocios.length > 0 && (
             <Link href="/directorio/mi-negocio/pedidos" className="relative rounded-full border border-slate-300 px-6 py-2.5 text-sm font-bold text-ink hover:border-brand-400">
               🧾 Pedidos recibidos

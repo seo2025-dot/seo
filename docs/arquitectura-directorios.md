@@ -2,7 +2,7 @@
 
 Diseño técnico de las seis secciones nuevas de alta frecuencia: **Movilidad (taxis y mandados), Delivery, Farmacias y salud, Eventos y entradas, Mascotas y Servicios del hogar**.
 
-> **Estado.** **Fases 0 (base de datos), 1 (interfaz) y 2 (carrito y pedidos) están hechas** para **Delivery y Farmacias/Salud** (`activa: true` en `src/data/directorio.ts`). Base de datos: `update_006`, `update_007` y `update_008`, probadas contra PostgreSQL real (65 pruebas en `supabase/tests/directorios.test.mjs`). Interfaz: hub, listados con filtros, fichas, buscador universal, alta guiada y panel «Mi negocio» (lógica probada en `supabase/tests/directorio-ui.test.mjs`, 42 pruebas). **Fase 2:** carrito, pago, «Mis pedidos», bandeja del negocio y seguimiento en tiempo real (ver §4.6). Las otras cuatro secciones ya existen en la base de datos y se activan cambiando un indicador (ver §4.5); las **solicitudes con ofertas (Hogar, Movilidad, Mascotas)** siguen pendientes.
+> **Estado.** **Fases 0 (base de datos), 1 (interfaz) y 2 (carrito, pedidos, solicitudes y ofertas) están hechas.** Están activas **Delivery, Farmacias/Salud, Taxis y mandados, Mascotas y Servicios del hogar** (`activa: true` en `src/data/directorio.ts`); solo **Eventos** sigue como «Muy pronto». Base de datos: `update_006`, `update_007` y `update_008`, probadas contra PostgreSQL real (67 pruebas en `supabase/tests/directorios.test.mjs`). Interfaz: hub, listados con filtros, fichas, buscador universal, alta guiada y panel «Mi negocio» (lógica probada en `supabase/tests/directorio-ui.test.mjs`, 52 pruebas). **Fase 2:** carrito, pago, «Mis pedidos», bandeja del negocio y seguimiento en tiempo real (ver §4.6), y solicitudes con ofertas para Taxis, Hogar y Mascotas (ver §4.7). Pendiente: la sección de **Eventos y entradas**.
 
 ---
 
@@ -227,7 +227,27 @@ src/features/directorio/
 - **Tiempo real:** `orders` está en la publicación realtime; las listas y el detalle se recargan al cambiar.
 - **Pago:** efectivo o transferencia coordinada por chat. No hay pasarela de pago todavía.
 
-**Pendiente de la Fase 2:** solicitudes con ofertas para Hogar, Movilidad y Mascotas (las tablas y funciones ya existen; falta la interfaz y activar esas secciones), cupones con monedas y pasarela de pago.
+**Pendiente:** cupones con monedas y pasarela de pago.
+
+### 4.7 Fase 2: solicitudes y ofertas (Taxis, Hogar y Mascotas)
+
+**Flujo.** «Pedir ofertas» (`/directorio/solicitudes/nueva`) → se avisa a los profesionales de la categoría (máx. 20, los de la misma zona primero) → cada uno envía **precio y tiempo** con uno de sus perfiles → quien pidió compara, acepta una y **coordinan por el chat** que se abre con la primera oferta → reseña en la ficha del profesional.
+
+| Ruta | Quién | Qué hace |
+|---|---|---|
+| `/directorio/solicitudes` | cualquiera con sesión | pestañas «Mis solicitudes» (con ofertas para revisar) y «Para mi negocio» (lo que piden en tu categoría, con insignia de pendientes) |
+| `/directorio/solicitudes/nueva` | cualquiera con sesión | formulario con categoría, zona (y destino en viajes), cuándo, presupuesto y detalles según la categoría |
+| `/directorio/solicitudes/[id]` | solicitante o profesional | el solicitante ve las ofertas (más barata y más rápida marcadas), acepta o cierra; el profesional ofrece, cambia o retira la suya |
+
+**Decisiones.**
+- **Las reglas viven en el servidor** (`create_service_request`, `send_offer`, `accept_offer`…); el navegador las repite para avisar antes (`validarSolicitud`, `validarOferta`) y dos pruebas de paridad contra PostgreSQL comprueban que lo que el cliente da por bueno el servidor no lo rechaza.
+- **Caducidad por momento:** «ahora» 1 h, «hoy» 12 h, «otro día» hasta 2 h después de la hora elegida (máx. 90 días). Una abierta con la hora vencida se muestra como «Caducada» aunque la base no haya cambiado su estado. Máximo 5 solicitudes abiertas por persona.
+- **Detalles con lista blanca:** solo se envían campos conocidos con valores válidos (pasajeros, tamaño del envío, urgencia, tipo de mascota); nunca texto libre en `details`.
+- **Privacidad:** la solicitud solo lleva la **zona**; la dirección exacta se da por chat tras elegir. Cada profesional solo ve **su** oferta; el solicitante ve todas. A los profesionales solo se les muestra el nombre de pila.
+- **Movilidad exige identidad verificada** para ofertar (y para recibir avisos de solicitudes); la interfaz lo explica y enlaza a `/verificacion`.
+- **Tiempo real:** `service_requests` y `service_offers` están en la publicación realtime; las listas se recargan al cambiar (las de profesionales con un pequeño retardo para agrupar ráfagas).
+
+**Sugerencia pendiente:** limitar el tamaño de `details` en SQL (hoy solo se acota en el navegador) y una interfaz para que el profesional marque el trabajo como terminado.
 
 ## 5. Pautas para mantener el autoservicio
 

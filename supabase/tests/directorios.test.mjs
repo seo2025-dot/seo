@@ -751,6 +751,90 @@ await test("withdraw_offer, close_service_request y solicitudes caducadas", asyn
   assert.equal((await como(otro, "select id from public.service_requests where id = $1", [caduca])).length, 0, "las caducadas dejan de verse");
 });
 
+// ── 6b. Paridad solicitudes/ofertas ↔ servidor ──────────────────────────────
+console.log("\nSolicitudes: paridad con create_service_request() y send_offer()");
+const { argumentosOferta, argumentosSolicitud, validarOferta, validarSolicitud } = await import("@/lib/directorio/solicitudes");
+const solicitudOk = (extra = {}) => ({ vertical: "hogar", subtipo: "plomero", titulo: "Fuga en el baño", descripcion: "Gotea bajo el lavabo", zona: "Centro", destino: "", momento: "today", programada: "", presupuesto: "20", detalles: { urgente: true }, ...extra });
+const enEcuador = (ms) => new Date(ms - 5 * 3_600_000).toISOString().slice(0, 16); // valor de un input datetime-local
+await test("PARIDAD: si validarSolicitud() da el visto bueno el servidor acepta; si no, y la regla es del servidor, también rechaza", async () => {
+  const manana = enEcuador(Date.now() + 86_400_000);
+  const escenarios = [
+    // [nombre, datos, ¿la regla es también del servidor?]
+    ["hogar urgente", solicitudOk(), false],
+    ["hogar sin presupuesto", solicitudOk({ presupuesto: "" }), false],
+    ["presupuesto con coma y símbolo", solicitudOk({ presupuesto: "$12,50" }), false],
+    ["viaje programado para mañana", solicitudOk({ vertical: "movilidad", subtipo: "taxi", destino: "Aeropuerto", momento: "scheduled", programada: manana, detalles: { pasajeros: 3 } }), false],
+    ["encomienda ahora", solicitudOk({ vertical: "movilidad", subtipo: "encomienda", destino: "Sayausí", momento: "now", detalles: { tamano: "mediano" } }), false],
+    ["mascotas: paseador", solicitudOk({ vertical: "mascotas", subtipo: "paseador", titulo: "Pasear a mi perro", detalles: { mascota: "perro" } }), false],
+    ["detalles manipulados se descartan", solicitudOk({ detalles: { urgente: "sí", otro: "x".repeat(5000), pasajeros: 99 } }), false],
+    ["título demasiado corto", solicitudOk({ titulo: "Ay" }), true],
+    ["título de 101 letras", solicitudOk({ titulo: "a".repeat(101) }), true],
+    ["fecha pasada", solicitudOk({ momento: "scheduled", programada: enEcuador(Date.now() - 3_600_000) }), true],
+    ["fecha a más de 90 días", solicitudOk({ momento: "scheduled", programada: enEcuador(Date.now() + 100 * 86_400_000) }), true],
+    ["programada sin fecha", solicitudOk({ momento: "scheduled", programada: "" }), true],
+    ["categoría de otra sección", solicitudOk({ vertical: "movilidad", subtipo: "plomero", destino: "X" }), true],
+    ["sección sin solicitudes", solicitudOk({ vertical: "delivery", subtipo: "restaurante" }), true],
+    ["presupuesto cero", solicitudOk({ presupuesto: "0" }), false],
+    ["presupuesto absurdo", solicitudOk({ presupuesto: "abc" }), false],
+    ["viaje sin destino", solicitudOk({ vertical: "movilidad", subtipo: "taxi", destino: "" }), false],
+    ["sin zona", solicitudOk({ zona: "" }), false],
+  ];
+  for (const [nombre, datos, delServidor] of escenarios) {
+    const quien = await persona(`Solicitante${Math.random().toString(36).slice(2, 9)}`);
+    const clienteRechaza = Object.keys(validarSolicitud(datos)).length > 0;
+    let a;
+    try {
+      a = argumentosSolicitud(datos);
+    } catch {
+      a = null;
+    }
+    let servidorRechaza = false;
+    try {
+      if (!a) throw new Error("argumentos imposibles");
+      await como(quien, "select public.create_service_request($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb) id", [a.p_vertical, a.p_subtype, a.p_title, a.p_description, a.p_zone, a.p_dest_zone, a.p_when, a.p_scheduled_at, a.p_budget, JSON.stringify(a.p_details)]);
+    } catch (e) {
+      servidorRechaza = true;
+      if (!clienteRechaza) throw new Error(`«${nombre}»: el cliente lo daba por bueno y el servidor lo rechazó (${e.message})`);
+    }
+    if (delServidor) assert.ok(servidorRechaza && clienteRechaza, `«${nombre}»: ambos deben rechazarlo (cliente ${clienteRechaza}, servidor ${servidorRechaza})`);
+  }
+  const limpios = argumentosSolicitud(solicitudOk({ detalles: { urgente: "sí", otro: "x".repeat(5000), pasajeros: 99 } })).p_details;
+  assert.deepEqual(limpios, {}, "solo se envían los campos conocidos y con valores válidos");
+});
+await test("PARIDAD: validarOferta() y send_offer() coinciden en precio, tiempo y mensaje", async () => {
+  const cliente_ = await persona(`Pide${Math.random().toString(36).slice(2, 8)}`);
+  const prof = await persona(`Profe${Math.random().toString(36).slice(2, 8)}`);
+  const fontanero = await perfil(prof, { vertical: "hogar", subtype: "plomero", name: "Plomería Rápida" });
+  const sol = await solicitar(cliente_, { vertical: "hogar", subtype: "plomero", title: "Cambiar un grifo", dest: "", when: "today" });
+  const casos = [
+    ["oferta normal", { precio: "18.50", minutos: "45", mensaje: "Llevo repuestos" }],
+    ["precio con coma", { precio: "18,5", minutos: "45", mensaje: "" }],
+    ["precio cero", { precio: "0", minutos: "45", mensaje: "" }],
+    ["precio no numérico", { precio: "barato", minutos: "45", mensaje: "" }],
+    ["sin precio", { precio: "", minutos: "45", mensaje: "" }],
+    ["tiempo cero", { precio: "10", minutos: "0", mensaje: "" }],
+    ["tiempo fuera de rango", { precio: "10", minutos: "10081", mensaje: "" }],
+    ["tiempo máximo", { precio: "10", minutos: "10080", mensaje: "" }],
+    ["tiempo decimal", { precio: "10", minutos: "1.5", mensaje: "" }],
+    ["mensaje de 301 letras", { precio: "10", minutos: "30", mensaje: "a".repeat(301) }],
+    ["mensaje de 300 letras", { precio: "10", minutos: "30", mensaje: "a".repeat(300) }],
+  ];
+  for (const [nombre, datos] of casos) {
+    const clienteRechaza = Object.keys(validarOferta(datos)).length > 0;
+    const a = argumentosOferta(sol, fontanero.id, datos);
+    let servidorRechaza = false;
+    try {
+      await como(prof, "select public.send_offer($1, $2, $3, $4, $5) id", [a.p_request, a.p_provider, a.p_price, Number.isNaN(a.p_eta) ? null : a.p_eta, a.p_message]);
+    } catch (e) {
+      servidorRechaza = true;
+      if (!clienteRechaza) throw new Error(`«${nombre}»: el cliente lo daba por bueno y el servidor lo rechazó (${e.message})`);
+    }
+    // El servidor recorta el mensaje a 300 letras en vez de rechazarlo: el cliente es más estricto a propósito (no deja escribir de más).
+    if (nombre.startsWith("mensaje de 301")) assert.ok(clienteRechaza && !servidorRechaza);
+    else assert.equal(servidorRechaza, clienteRechaza, `«${nombre}»: cliente ${clienteRechaza ? "rechaza" : "acepta"}, servidor ${servidorRechaza ? "rechaza" : "acepta"}`);
+  }
+});
+
 // ── 7. Eventos y entradas ───────────────────────────────────────────────────
 console.log("\nEventos y entradas");
 const organizador = await persona("Organizador");

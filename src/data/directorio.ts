@@ -73,7 +73,7 @@ export interface Vertical {
 export const VERTICALES: Vertical[] = [
   {
     id: "movilidad",
-    activa: false,
+    activa: true,
     buscador: "Taxi, encomienda, moto mensajero…",
     plantilla: { canales: ["visita"], tipoItem: "rate", item: { singular: "tarifa", plural: "tarifas" }, secciones: ["Viajes", "Encomiendas"], ejemplos: [{ nombre: "Carrera urbana", precio: "3" }], horario: "24h" },
     alias: "taxis",
@@ -166,7 +166,7 @@ export const VERTICALES: Vertical[] = [
   },
   {
     id: "mascotas",
-    activa: false,
+    activa: true,
     buscador: "Veterinaria, paseador, alimento…",
     plantilla: { canales: ["local"], tipoItem: "product", item: { singular: "producto", plural: "productos" }, secciones: ["Alimento", "Accesorios", "Salud"], ejemplos: [{ nombre: "Alimento para perro 2 kg", precio: "6" }], horario: "lun-sab" },
     alias: "mascotas",
@@ -186,7 +186,7 @@ export const VERTICALES: Vertical[] = [
   },
   {
     id: "hogar",
-    activa: false,
+    activa: true,
     buscador: "Plomero, electricista, cerrajero…",
     plantilla: { canales: ["visita"], tipoItem: "service", item: { singular: "servicio", plural: "servicios" }, secciones: ["Reparaciones", "Instalaciones"], ejemplos: [{ nombre: "Revisión y presupuesto", precio: "15" }], horario: "lun-sab" },
     alias: "hogar",

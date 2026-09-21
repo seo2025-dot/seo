@@ -1,5 +1,5 @@
 import Link from "next/link";
-import type { Vertical } from "@/data/directorio";
+import { VERTICAL_POR_ID, type Vertical, type VerticalId } from "@/data/directorio";
 import { ZONAS } from "@/data/catalogos";
 
 /** Tarjeta de una sección en el hub. Las que aún no tienen interfaz se muestran como «Muy pronto». */
@@ -48,6 +48,25 @@ export function EstadoVacio({ emoji, titulo, texto, accion }: { emoji: string; t
         </Link>
       )}
     </div>
+  );
+}
+
+/** «¿Necesitas un plomero? Pide ofertas»: solo en las secciones donde la gente publica solicitudes (Taxis, Hogar, Mascotas). */
+export function InvitacionSolicitud({ vertical, className = "" }: { vertical: string; className?: string }) {
+  const v = VERTICAL_POR_ID[vertical as VerticalId];
+  if (!v?.capacidades.solicitudes) return null;
+  return (
+    <section aria-labelledby="solicitud-titulo" className={`flex flex-wrap items-center justify-between gap-4 rounded-3xl border border-brand-200 bg-brand-50 p-5 sm:p-6 ${className}`}>
+      <div className="min-w-0 max-w-xl">
+        <h2 id="solicitud-titulo" className="text-lg font-black text-ink">
+          ¿No sabes a quién llamar? Pide ofertas
+        </h2>
+        <p className="mt-1 text-sm text-slate-600">Cuéntanos qué necesitas y los profesionales de {v.etiqueta.toLowerCase()} te responden con su precio y su tiempo. Tú eliges y coordinan por chat. Es gratis.</p>
+      </div>
+      <Link href={`/directorio/solicitudes/nueva?seccion=${v.id}`} className="boton-marca rounded-full px-6 py-2.5 text-sm font-bold text-white">
+        Pedir ofertas
+      </Link>
+    </section>
   );
 }
 

@@ -13,6 +13,10 @@ import {
   PAGOS, TTL_SIN_RESPUESTA_MS, accionesNegocio, agruparBandeja, argumentosPedido, etiquetaEstado, grupoDe, haceCuanto, carritoDesdePedido, mapearPedido, mensajeErrorPedido, puedeCancelarCliente, resumenLineas, seguimiento,
   tiempoParaCaducar, validarPago,
 } from "@/lib/directorio/pedidos";
+import {
+  VERTICALES_SOLICITUD, argumentosOferta, argumentosSolicitud, bloqueoOferta, camposDetalle, destacadas, estadoVisible, instanteDesdeLocal, limpiarDetalles, mapearOferta, mapearSolicitud,
+  mensajeErrorSolicitud, ordenarOfertas, perfilesQueEncajan, resumenDetalles, textoMomento, textoTiempoOferta, tiempoRestante, validarOferta, validarSolicitud,
+} from "@/lib/directorio/solicitudes";
 import { completitudNegocio } from "@/lib/directorio/completitud";
 import { enlaceTel, enlaceWhatsapp, formatearTelefono, mensajePedido, normalizarTelefonoEC, telefonoValido } from "@/lib/directorio/contacto";
 import { FILTROS_INICIALES, TAM_PAGINA, argumentosBusqueda, consultaDesdeFiltros, consultaUniversal, filtrosActivos, filtrosDesdeParams, hrefLista } from "@/lib/directorio/filtros";
@@ -40,9 +44,9 @@ const test = async (nombre, fn) => {
 };
 
 console.log("\nCatálogo y plantillas");
-await test("secciones activas: Delivery y Farmacias; las demás llegan en otra fase", () => {
-  assert.deepEqual(VERTICALES_ACTIVAS.map((v) => v.id), ["delivery", "salud"]);
-  assert.equal(VERTICALES.filter((v) => !v.activa).length, 4);
+await test("secciones activas: todas menos Eventos (que llega en otra fase)", () => {
+  assert.deepEqual(VERTICALES_ACTIVAS.map((v) => v.id), ["movilidad", "delivery", "salud", "mascotas", "hogar"]);
+  assert.deepEqual(VERTICALES.filter((v) => !v.activa).map((v) => v.id), ["eventos"]);
 });
 await test("cada plantilla de alta es coherente: canales válidos, horario existente, tipo de elemento permitido y ejemplos con precio", () => {
   const canales = new Set(CANALES.map((c) => c.id));
@@ -351,14 +355,15 @@ await test("integración: los alias de next.config.ts coinciden con el catálogo
   const enConfig = [...config.matchAll(/\["(\w+)", "(\w+)"\]/g)].map((m) => [m[1], m[2]]);
   assert.deepEqual(enConfig, VERTICALES.map((v) => [v.alias, v.id]), "alias de next.config.ts distintos a VERTICALES");
   const middleware = fs.readFileSync(new URL("../../src/lib/supabase/middleware.ts", import.meta.url), "utf8");
-  assert.match(middleware, /"\/directorio\/mi-negocio"/);
+  for (const ruta of ["mi-negocio", "pedidos", "solicitudes"]) assert.match(middleware, new RegExp(`"/directorio/${ruta}"`), `${ruta} debe estar protegida`);
   const marca = fs.readFileSync(new URL("../../src/lib/marca.ts", import.meta.url), "utf8");
   assert.match(marca, /id: "delivery", href: "\/directorio\/delivery"/);
   assert.match(marca, /id: "farmacias", href: "\/directorio\/salud"/);
   const home = fs.readFileSync(new URL("../../src/app/page.tsx", import.meta.url), "utf8");
   assert.match(home, /<BuscadorUniversal \/>/, "la portada usa el buscador universal");
   const buscador = fs.readFileSync(new URL("../../src/components/BuscadorUniversal.tsx", import.meta.url), "utf8");
-  for (const v of VERTICALES_ACTIVAS) assert.ok(buscador.includes(`/directorio/${v.id}`), `el buscador universal no lleva a ${v.id}`);
+  // El buscador de la portada tiene pestañas solo para Comida y Farmacias; el resto se busca desde «Todo» o desde su sección.
+  for (const id of ["delivery", "salud"]) assert.ok(buscador.includes(`/directorio/${id}`), `el buscador universal no lleva a ${id}`);
   assert.ok(buscador.includes("/directorio/buscar"));
   assert.ok(buscador.includes(`nombre: "turno"`) && buscador.includes(`nombre: "abierto"`), "los filtros rápidos usan los parámetros que entiende el listado");
 });
@@ -584,6 +589,139 @@ await test("mensajeErrorPedido traduce los errores del servidor", () => {
   assert.equal(mensajeErrorPedido("El pedido mínimo es de 5 USD"), "El pedido mínimo es de 5 USD");
   assert.equal(mensajeErrorPedido("algo raro"), "algo raro");
   assert.deepEqual(Object.keys(PAGOS), ["cash", "transfer"]);
+});
+
+console.log("\nSolicitudes y ofertas");
+const parametrosSql = (sql, fn) => {
+  const m = sql.match(new RegExp(`function public\\.${fn}\\(([^)]*)\\)`));
+  assert.ok(m, `no se encontró ${fn} en el SQL`);
+  return m[1].split(",").map((p) => p.trim().split(/\s+/)[0]).filter(Boolean);
+};
+const ahoraSol = Date.UTC(2026, 5, 1, 17, 0); // 12:00 en Ecuador
+const solOk = (extra = {}) => ({ vertical: "hogar", subtipo: "plomero", titulo: "Fuga en el baño", descripcion: "", zona: "Centro", destino: "", momento: "today", programada: "", presupuesto: "", detalles: {}, ...extra });
+await test("validarSolicitud: campos obligatorios, límites y fechas (hora de Ecuador)", () => {
+  assert.deepEqual(validarSolicitud(solOk(), ahoraSol), {});
+  assert.ok(validarSolicitud(solOk({ titulo: "Ay" }), ahoraSol).titulo);
+  assert.ok(validarSolicitud(solOk({ titulo: "a".repeat(101) }), ahoraSol).titulo);
+  assert.ok(validarSolicitud(solOk({ descripcion: "a".repeat(601) }), ahoraSol).descripcion);
+  assert.ok(validarSolicitud(solOk({ zona: " " }), ahoraSol).zona);
+  assert.ok(validarSolicitud(solOk({ subtipo: "taxi" }), ahoraSol).subtipo, "una categoría de otra sección no vale");
+  assert.ok(validarSolicitud(solOk({ vertical: "delivery", subtipo: "restaurante" }), ahoraSol).vertical);
+  assert.ok(validarSolicitud(solOk({ vertical: "movilidad", subtipo: "taxi" }), ahoraSol).destino, "un viaje necesita destino");
+  assert.deepEqual(validarSolicitud(solOk({ vertical: "movilidad", subtipo: "moto_mensajero" }), ahoraSol), {}, "el mensajero solo pide zona");
+  for (const p of ["0", "-3", "abc", "1.234", "$"]) assert.ok(validarSolicitud(solOk({ presupuesto: p }), ahoraSol).presupuesto, `presupuesto «${p}»`);
+  for (const p of ["8", "12.50", "12,5", "$20"]) assert.equal(validarSolicitud(solOk({ presupuesto: p }), ahoraSol).presupuesto, undefined, `presupuesto «${p}»`);
+  const prog = (t) => validarSolicitud(solOk({ momento: "scheduled", programada: t }), ahoraSol).programada;
+  assert.ok(prog(""), "sin fecha");
+  assert.ok(prog("no-es-fecha"));
+  assert.ok(prog("2026-06-01T11:59"), "pasada (12:00 en Ecuador)");
+  assert.equal(prog("2026-06-01T12:01"), undefined);
+  assert.equal(prog("2026-08-30T12:00"), undefined, "dentro de 90 días");
+  assert.ok(prog("2026-09-02T12:00"), "más de 90 días");
+});
+await test("instanteDesdeLocal: el valor del input se interpreta en hora de Ecuador", () => {
+  assert.equal(instanteDesdeLocal("2026-06-01T12:00"), Date.UTC(2026, 5, 1, 17, 0));
+  assert.ok(Number.isNaN(instanteDesdeLocal("2026-06-01")));
+  assert.ok(Number.isNaN(instanteDesdeLocal("")));
+});
+await test("argumentosSolicitud usa exactamente los parámetros de create_service_request() en SQL y depura los detalles", () => {
+  const a = argumentosSolicitud(solOk({ presupuesto: "12,5", detalles: { urgente: true, pasajeros: 3, extra: "x".repeat(2000) } }));
+  assert.deepEqual(Object.keys(a).sort(), parametrosSql(SQL_006, "create_service_request").sort());
+  assert.deepEqual([a.p_budget, a.p_when, a.p_scheduled_at, a.p_dest_zone, a.p_details], [12.5, "today", null, "", { urgente: true }]);
+  const viaje = argumentosSolicitud(solOk({ vertical: "movilidad", subtipo: "taxi", destino: " Aeropuerto ", momento: "scheduled", programada: "2026-06-02T08:30", detalles: { pasajeros: 2, urgente: true } }));
+  assert.deepEqual([viaje.p_dest_zone, viaje.p_scheduled_at, viaje.p_details], ["Aeropuerto", "2026-06-02T13:30:00.000Z", { pasajeros: 2 }]);
+  assert.equal(argumentosSolicitud(solOk({ vertical: "movilidad", subtipo: "taxi", destino: "X", momento: "now", programada: "2026-06-02T08:30" })).p_scheduled_at, null, "solo se envía la fecha si es programada");
+  assert.equal(argumentosSolicitud(solOk({ destino: "Otro sitio" })).p_dest_zone, "", "el destino solo cuenta en viajes y encomiendas");
+});
+await test("camposDetalle / limpiarDetalles / resumenDetalles", () => {
+  assert.deepEqual(camposDetalle("movilidad", "taxi").map((c) => c.id), ["pasajeros"]);
+  assert.deepEqual(camposDetalle("movilidad", "encomienda").map((c) => c.id), ["tamano"]);
+  assert.deepEqual(camposDetalle("hogar", "plomero").map((c) => c.id), ["urgente"]);
+  assert.deepEqual(camposDetalle("mascotas", "paseador").map((c) => c.id), ["mascota"]);
+  assert.deepEqual(camposDetalle("delivery", "restaurante"), []);
+  const c = camposDetalle("movilidad", "taxi");
+  assert.deepEqual(limpiarDetalles(c, { pasajeros: 4 }), { pasajeros: 4 });
+  for (const malo of [0, 7, 2.5, "3", null, NaN]) assert.deepEqual(limpiarDetalles(c, { pasajeros: malo }), {}, `pasajeros ${String(malo)}`);
+  assert.deepEqual(limpiarDetalles(camposDetalle("mascotas", "veterinaria"), { mascota: "dragón" }), {});
+  assert.deepEqual(limpiarDetalles(camposDetalle("hogar", "plomero"), { urgente: false }), {}, "«no urgente» no se guarda");
+  assert.equal(resumenDetalles("movilidad", "taxi", { pasajeros: 1 }), "1 pasajero");
+  assert.equal(resumenDetalles("movilidad", "taxi", { pasajeros: 3 }), "3 pasajeros");
+  assert.equal(resumenDetalles("hogar", "plomero", { urgente: true }), "Urgente");
+  assert.equal(resumenDetalles("movilidad", "encomienda", { tamano: "pequeno" }), "Pequeño");
+  assert.equal(resumenDetalles("hogar", "plomero", {}), "");
+  for (const v of VERTICALES_SOLICITUD) for (const s of VERTICAL_POR_ID[v].subtipos) assert.ok(camposDetalle(v, s.id).length >= 1, `${v}/${s.id} sin detalles`);
+});
+await test("VERTICALES_SOLICITUD sale del catálogo (movilidad, hogar y mascotas)", () => {
+  assert.deepEqual([...VERTICALES_SOLICITUD].sort(), ["hogar", "mascotas", "movilidad"]);
+});
+const filaSol = (extra = {}) => ({ id: "s1", requester_id: "u1", vertical: "hogar", subtype: "plomero", title: "Fuga", description: "", zone: "Centro", dest_zone: "", when_kind: "today", scheduled_at: null, budget_max: "20.00", details: { urgente: true }, status: "open", accepted_offer_id: null, expires_at: new Date(ahoraSol + 3_600_000).toISOString(), created_at: new Date(ahoraSol).toISOString(), ...extra });
+await test("mapearSolicitud / mapearOferta y estado visible (una abierta con la hora vencida es «caducada»)", () => {
+  const s = mapearSolicitud(filaSol());
+  assert.deepEqual([s.presupuesto, s.programada, s.estado, s.detalles, s.caduca], [20, undefined, "open", { urgente: true }, ahoraSol + 3_600_000]);
+  assert.equal(mapearSolicitud(filaSol({ budget_max: null })).presupuesto, undefined);
+  assert.equal(mapearSolicitud(filaSol({ details: null })).detalles && Object.keys(mapearSolicitud(filaSol({ details: null })).detalles).length, 0);
+  assert.equal(mapearSolicitud(filaSol({ vertical: "inventada" })), null);
+  assert.equal(mapearSolicitud(filaSol({ status: "rara" })), null);
+  assert.equal(mapearSolicitud(filaSol({ when_kind: "cuando sea" })), null);
+  assert.equal(estadoVisible(s, ahoraSol), "open");
+  assert.equal(estadoVisible(s, ahoraSol + 3_600_000), "expired");
+  assert.equal(estadoVisible({ ...s, estado: "accepted" }, ahoraSol + 9e9), "accepted", "solo caducan las abiertas");
+  const o = mapearOferta({ id: "o1", request_id: "s1", provider_id: "p1", price: "9.50", eta_minutes: 12, message: null, status: "sent", chat_id: null, created_at: new Date(ahoraSol).toISOString() });
+  assert.deepEqual([o.precio, o.minutos, o.mensaje, o.chatId], [9.5, 12, "", undefined]);
+  assert.equal(mapearOferta({ ...{ id: "o", request_id: "s", provider_id: "p", price: 1, eta_minutes: 1, message: "", chat_id: null, created_at: new Date(0).toISOString() }, status: "rara" }), null);
+});
+await test("textos: tiempo restante, tiempo de la oferta y momento", () => {
+  assert.equal(tiempoRestante(ahoraSol, ahoraSol), "Caducada");
+  assert.equal(tiempoRestante(ahoraSol + 45 * 60_000, ahoraSol), "Quedan 45 min");
+  assert.equal(tiempoRestante(ahoraSol + 130 * 60_000, ahoraSol), "Quedan 2 h 10 min");
+  assert.equal(tiempoRestante(ahoraSol + 120 * 60_000, ahoraSol), "Quedan 2 h");
+  assert.equal(tiempoRestante(ahoraSol + 3 * 86_400_000, ahoraSol), "Quedan 3 d");
+  assert.deepEqual([12, 60, 90, 1440, 2880].map(textoTiempoOferta), ["~12 min", "1 h", "1 h 30 min", "1 día", "2 días"]);
+  assert.equal(textoMomento({ momento: "now" }), "Ahora mismo");
+  assert.equal(textoMomento({ momento: "today" }), "Hoy");
+  assert.match(textoMomento({ momento: "scheduled", programada: Date.UTC(2026, 5, 2, 13, 30) }), /08:30/, "hora de Ecuador");
+});
+await test("validarOferta y argumentosOferta usan las reglas y los parámetros de send_offer()", () => {
+  assert.deepEqual(validarOferta({ precio: "9.50", minutos: "12", mensaje: "" }), {});
+  assert.ok(validarOferta({ precio: "0", minutos: "12", mensaje: "" }).precio);
+  assert.ok(validarOferta({ precio: "9", minutos: "0", mensaje: "" }).minutos);
+  assert.ok(validarOferta({ precio: "9", minutos: "10081", mensaje: "" }).minutos);
+  assert.ok(validarOferta({ precio: "9", minutos: "1.5", mensaje: "" }).minutos);
+  assert.ok(validarOferta({ precio: "9", minutos: "5", mensaje: "a".repeat(301) }).mensaje);
+  const a = argumentosOferta("s1", "p1", { precio: "9,5", minutos: " 12 ", mensaje: " Llego rápido " });
+  assert.deepEqual(a, { p_request: "s1", p_provider: "p1", p_price: 9.5, p_eta: 12, p_message: "Llego rápido" });
+  assert.deepEqual(Object.keys(a).sort(), parametrosSql(SQL_006, "send_offer").sort());
+});
+await test("ofertas: orden (aceptada, vigentes por precio y rapidez, resto), destacadas y quién puede ofertar", () => {
+  const of = (id, estado, precio, minutos, creado = 0) => ({ id, estado, precio, minutos, creado });
+  const lista = [of("a", "rejected", 1, 1), of("b", "sent", 12, 10), of("c", "sent", 8, 40), of("d", "sent", 8, 15), of("e", "withdrawn", 2, 2), of("f", "accepted", 20, 30)];
+  assert.deepEqual(ordenarOfertas(lista).map((o) => o.id), ["f", "d", "c", "b", "a", "e"]);
+  assert.equal(lista[0].id, "a", "no muta");
+  assert.deepEqual(destacadas(lista), { barata: "d", rapida: "b" });
+  assert.deepEqual(destacadas([of("x", "sent", 5, 5)]), {}, "con una sola oferta no hay nada que comparar");
+  const sol = { vertical: "hogar", estado: "open", caduca: ahoraSol + 1000 };
+  assert.equal(bloqueoOferta(sol, { identidadVerificada: false, perfilesQueEncajan: 1 }, ahoraSol), null);
+  assert.match(bloqueoOferta(sol, { identidadVerificada: false, perfilesQueEncajan: 0 }, ahoraSol), /perfil activo/);
+  assert.match(bloqueoOferta({ ...sol, vertical: "movilidad" }, { identidadVerificada: false, perfilesQueEncajan: 1 }, ahoraSol), /verificar tu identidad/);
+  assert.equal(bloqueoOferta({ ...sol, vertical: "movilidad" }, { identidadVerificada: true, perfilesQueEncajan: 1 }, ahoraSol), null);
+  assert.match(bloqueoOferta(sol, { identidadVerificada: true, perfilesQueEncajan: 1 }, ahoraSol + 5000), /ya no recibe ofertas/);
+  assert.match(bloqueoOferta({ ...sol, estado: "accepted" }, { identidadVerificada: true, perfilesQueEncajan: 1 }, ahoraSol), /ya no recibe ofertas/);
+  const perfiles = [
+    { id: "1", vertical: "hogar", subtipo: "plomero", estado: "active" },
+    { id: "2", vertical: "hogar", subtipo: "plomero", estado: "paused" },
+    { id: "3", vertical: "hogar", subtipo: "electricista", estado: "active" },
+    { id: "4", vertical: "movilidad", subtipo: "plomero", estado: "active" },
+  ];
+  assert.deepEqual(perfilesQueEncajan({ vertical: "hogar", subtipo: "plomero" }, perfiles).map((p) => p.id), ["1"]);
+});
+await test("mensajeErrorSolicitud traduce los errores del servidor", () => {
+  assert.match(mensajeErrorSolicitud("Ya tienes 5 solicitudes abiertas"), /Cierra alguna/);
+  assert.match(mensajeErrorSolicitud("Para ofertar viajes y encomiendas debes verificar tu identidad"), /verificar tu identidad/);
+  assert.match(mensajeErrorSolicitud("La solicitud ya no está abierta"), /ya no está abierta/);
+  assert.match(mensajeErrorSolicitud("Esa oferta ya fue resuelta"), /Actualiza/);
+  assert.match(mensajeErrorSolicitud("No se puede cerrar esa solicitud"), /Actualiza/);
+  assert.match(mensajeErrorSolicitud("permission denied for table x"), /sesión caducó/);
+  assert.equal(mensajeErrorSolicitud("algo raro"), "algo raro");
 });
 
 console.log(`\n${ok} pruebas OK, ${fallos} con fallo`);
