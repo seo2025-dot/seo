@@ -15,6 +15,11 @@ const PROTEGIDAS = [
   "/invitar",
   "/astrologia",
   "/empleos/publicar",
+  "/directorio/mi-negocio",
+  "/directorio/pedidos",
+  "/directorio/solicitudes",
+  "/directorio/entradas",
+  "/monedas",
   "/admin",
   "/onboarding",
 ];

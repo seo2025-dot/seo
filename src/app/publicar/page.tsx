@@ -31,6 +31,13 @@ function Publicar() {
         </Link>
         .
       </p>
+      <p className="mt-1 text-slate-500">
+        ¿Tienes un restaurante, una cafetería o una farmacia?{" "}
+        <Link href="/directorio/mi-negocio/nuevo" className="font-medium text-brand-600 hover:underline">
+          Regístralo en el directorio
+        </Link>{" "}
+        (+30 🪙 con tu primer negocio).
+      </p>
 
       <div role="tablist" aria-label="Modo de publicación" className="mt-6 grid grid-cols-2 gap-3">
         {(

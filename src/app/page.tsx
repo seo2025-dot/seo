@@ -13,14 +13,19 @@ import MiembrosRecientes from "@/components/MiembrosRecientes";
 import MuroHome from "@/components/MuroHome";
 import PanelHoy from "@/components/PanelHoy";
 import PruebaSocial from "@/components/PruebaSocial";
-import SearchBar from "@/components/SearchBar";
+import BuscadorUniversal from "@/components/BuscadorUniversal";
 import SeccionQueEs from "@/components/SeccionQueEs";
 import TendenciasSemana from "@/components/TendenciasSemana";
 import { useEscritorio } from "@/features/comunidad/hooks";
+import { useConteosDirectorio } from "@/features/directorio/hooks";
+
+/** «12 negocios» cuando hay datos reales; «Nuevo» mientras la sección arranca (nunca se inventa una cifra). */
+const chipDirectorio = (n: number | undefined, plural: string) => (n ? `${n} ${plural}` : "Nuevo");
 
 export default function Home() {
   const { estado, sesion, hidratado, anuncios, gigs, vacantes, noLeidosTotal } = useSocial();
   const escritorio = useEscritorio();
+  const conteos = useConteosDirectorio();
 
   const bonoDisponible = hidratado && !!sesion.uid && estado.ultimoCheckin !== new Date().toISOString().slice(0, 10);
   const transito = estado.yo.signo ? transitoDelDia(estado.yo.signo) : null;
@@ -43,6 +48,8 @@ export default function Home() {
   ];
   const secundarias = [
     { ...POR_ID.busco, texto: "Publica tu presupuesto", chip: `${buscando} búsquedas` },
+    { ...POR_ID.delivery, texto: "Comida a domicilio de tu barrio", chip: chipDirectorio(conteos.delivery, "negocios") },
+    { ...POR_ID.farmacias, texto: "Farmacias de turno y salud", chip: chipDirectorio(conteos.salud, "establecimientos") },
     { ...POR_ID.explorar, texto: "Personas afines, con filtros", chip: "Motor de afinidad" },
     { ...POR_ID.citas, texto: "Pareja, amistad o roomies", chip: "Match astral" },
     { ...POR_ID.retos, texto: "Gana monedas cada día", chip: "Retos diarios" },
@@ -92,7 +99,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
+          <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-5">
             {secundarias.map((m, i) => (
               <motion.div key={m.id} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.25 + 0.04 * i }}>
                 <Link href={m.href} className="tarjeta-viva flex h-full items-center gap-3 rounded-2xl border border-slate-200 bg-white p-3">
@@ -125,7 +132,7 @@ export default function Home() {
           )}
 
           <div className="mt-6 max-w-4xl">
-            <SearchBar />
+            <BuscadorUniversal />
           </div>
           <PruebaSocial className="mt-5 justify-start" />
         </div>

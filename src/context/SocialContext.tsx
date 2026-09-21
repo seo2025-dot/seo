@@ -16,6 +16,7 @@ import type { Conversacion, Post, ReaccionId, Solicitud, TipoPost, Usuario } fro
 import { negocioAAnuncio, propiedadAAnuncio, vehiculoAAnuncio } from "@/lib/anuncios";
 import { MISIONES } from "@/lib/recompensas";
 import { haySupabase, supabase } from "@/lib/supabaseClient";
+import { esMensajeDeMonedas, mensajeSaldoInsuficiente } from "@/lib/monedas";
 import type {
   AmistadFila,
   ChatResumenFila,
@@ -318,7 +319,7 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
 
   const mensajeDeError = (e: unknown) => {
     const m = e instanceof Error ? e.message : typeof e === "object" && e && "message" in e ? String((e as { message: unknown }).message) : "Error desconocido";
-    if (/insufficient_coins/.test(m)) return "No tienes suficientes monedas.";
+    if (/insufficient_coins/.test(m)) return mensajeSaldoInsuficiente(m) ?? "🪙 No tienes suficientes monedas.";
     if (/no_super_likes/.test(m)) return "No te quedan Super Likes.";
     if (/already_claimed|already_spun/.test(m)) return "Ya lo reclamaste hoy.";
     if (/cooldown/.test(m)) return "Aún no puedes sacar otra carta.";
@@ -1547,8 +1548,13 @@ export function SocialProvider({ children }: { children: React.ReactNode }) {
     <SocialContext.Provider value={valor}>
       {children}
       {aviso && (
-        <div role="status" className="fixed bottom-24 left-1/2 z-[200] max-w-[90vw] -translate-x-1/2 rounded-full bg-slate-900 px-5 py-3 text-sm text-white shadow-xl lg:bottom-8">
-          {aviso}
+        <div role="status" className="fixed bottom-24 left-1/2 z-[200] flex max-w-[90vw] -translate-x-1/2 flex-wrap items-center justify-center gap-x-3 gap-y-1 rounded-full bg-slate-900 px-5 py-3 text-sm text-white shadow-xl lg:bottom-8">
+          <span>{aviso}</span>
+          {esMensajeDeMonedas(aviso) && (
+            <a href="/monedas" className="font-bold text-sun underline underline-offset-2">
+              Recargar o ganar monedas
+            </a>
+          )}
         </div>
       )}
     </SocialContext.Provider>

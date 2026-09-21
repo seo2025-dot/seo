@@ -11,6 +11,7 @@ import { formatearHora, formatearPrecio } from "@/lib/formato";
 import { RESPUESTAS_RAPIDAS } from "@/lib/rompehielos";
 import Avatar from "@/components/Avatar";
 import Icono from "@/components/Icono";
+import { AvisoMensajesCita } from "@/features/monedas/Piezas";
 import { AstralBadge, ConfianzaBadge, VerificadoCheck } from "@/components/PerfilBadges";
 
 const ESTADO_OFERTA: Record<NonNullable<Mensaje["estado"]>, { texto: string; clases: string }> = {
@@ -178,6 +179,8 @@ export default function ChatPage() {
     enviarMensaje(cid, texto);
     setBorrador("");
   };
+  // Solo las citas y los matches cuentan mensajes: 3 gratis por conversación y después 1 moneda cada 5.
+  const escritos = conv.origen ? conv.mensajes.filter((m) => m.autor === "yo" && !m.tipo).length : 0;
 
   const enviarCotizar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -333,6 +336,7 @@ export default function ChatPage() {
             </button>
           ))}
         </div>
+        {conv.origen && <AvisoMensajesCita escritos={escritos} />}
         <form
           onSubmit={(e) => {
             e.preventDefault();

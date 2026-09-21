@@ -26,6 +26,8 @@ export const SECUNDARIAS: Seccion[] = [
   { id: "astrologia", href: "/astrologia", etiqueta: "Tarot", emoji: "🔮", degradado: "from-[#7a3cff] to-[#ff4d9d]" },
   { id: "mensajes", href: "/mensajes", etiqueta: "Mensajes", emoji: "💬", degradado: "from-aqua to-sun" },
   { id: "recompensas", href: "/recompensas", etiqueta: "Ruleta", emoji: "🎡", degradado: "from-sun to-flame" },
+  { id: "delivery", href: "/directorio/delivery", etiqueta: "Delivery", emoji: "🍔", degradado: "from-flame to-brand-500" },
+  { id: "farmacias", href: "/directorio/salud", etiqueta: "Farmacias", emoji: "💊", degradado: "from-aqua to-cyan-700" },
   { id: "explorar", href: "/explorar", etiqueta: "Explorar", emoji: "💞", degradado: "from-[#ff5a7a] to-brand-500" },
   { id: "retos", href: "/retos", etiqueta: "Retos", emoji: "🎯", degradado: "from-aqua to-cyan-700" },
   { id: "invitar", href: "/invitar", etiqueta: "Invitar", emoji: "🌱", degradado: "from-[#2fbf71] to-aqua" },

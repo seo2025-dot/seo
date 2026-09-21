@@ -14,12 +14,26 @@ const COLUMNAS: { titulo: string; enlaces: { href: string; label: string }[] }[]
     ],
   },
   {
+    titulo: "Directorio",
+    enlaces: [
+      { href: "/directorio", label: "Todo el directorio" },
+      { href: "/directorio/delivery", label: "Delivery" },
+      { href: "/directorio/salud", label: "Farmacias y salud" },
+      { href: "/directorio/pedidos", label: "Mis pedidos" },
+      { href: "/directorio/solicitudes", label: "Pedir ofertas" },
+      { href: "/directorio/eventos", label: "Eventos y entradas" },
+      { href: "/directorio/entradas", label: "Mis entradas" },
+      { href: "/directorio/mi-negocio/nuevo", label: "Registrar mi negocio" },
+    ],
+  },
+  {
     titulo: "conectari.com",
     enlaces: [
       { href: "/que-es", label: "¿Qué es conectari.com?" },
       { href: "/publicar", label: "Publicar gratis" },
       { href: "/verificacion", label: "Verificar mi identidad" },
       { href: "/recompensas", label: "Recompensas" },
+      { href: "/monedas", label: "Monedas y recargas" },
       { href: "/contacto", label: "Contacto" },
     ],
   },

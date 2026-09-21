@@ -7,6 +7,7 @@ import { useSocial } from "@/context/SocialContext";
 import { formatearCuentaAtras, useCuentaAtras } from "@/components/FomoBadges";
 import ReflexionDelDia from "@/components/ReflexionDelDia";
 import { useRetos } from "@/features/conexion/hooks";
+import { RetosComunidad } from "@/features/monedas/Piezas";
 import { primerNombre } from "@/lib/mensajes";
 import { msHastaReinicio, RETOS, resumenRetos } from "@/lib/retos";
 
@@ -113,6 +114,16 @@ export default function RetosPage() {
         })}
         {cargando && retos.length === 0 && <li className="h-20 animate-pulse rounded-2xl bg-slate-100" />}
       </ul>
+
+      <div className="mt-10">
+        <RetosComunidad titulo="Retos de la semana" />
+        <p className="mt-4 text-center text-sm text-slate-600">
+          ¿Necesitas monedas ya?{" "}
+          <Link href="/monedas" className="font-bold text-brand-700 hover:underline">
+            Recarga desde $0.50
+          </Link>
+        </p>
+      </div>
 
       <ReflexionDelDia
         className="mt-6"
