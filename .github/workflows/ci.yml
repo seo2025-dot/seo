@@ -51,3 +51,4 @@ jobs:
       - run: npx tsx supabase/tests/pagos.test.mjs
       - run: npx tsx supabase/tests/avisos.test.mjs
       - run: npx tsx supabase/tests/renderizado.test.mjs
+      - run: npx tsx supabase/tests/actualizar-todo.test.mjs

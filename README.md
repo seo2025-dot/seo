@@ -40,6 +40,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=sb_publishable_...
    >
    > **¿Y la 005?** Ejecuta `supabase/update_006_directorios.sql` (directorios de Movilidad, Delivery, Salud, Eventos, Mascotas y Hogar; idempotente). Sus pantallas (`/directorio`) llegan con la Fase 1 (ver abajo).
    >
+   > **Atajo: ejecuta `supabase/actualizar_todo.sql` (todas las actualizaciones 002 a 014 juntas; aplica solo las que faltan y se salta las que ya tienes) y guía paso a paso en [docs/puesta-en-marcha.md](docs/puesta-en-marcha.md).**
    > **¿Y la 006?** Ejecuta `supabase/update_007_buscador_universal.sql` (buscador universal del directorio: negocios y lo que venden, sin distinguir acentos). Aplica **006 y 007 antes de desplegar** la app: el directorio, la portada y el alta llaman a sus funciones y a las tablas nuevas.
    > **¿Y la 007?** Ejecuta `supabase/update_008_pedidos.sql` (carrito y pedidos de Delivery y Farmacias: teléfono del cliente, caducidad de pedidos sin respuesta y `place_order` con retiro en local). Aplícala antes de desplegar el carrito: cambia la firma de `place_order`.
    > **¿Y la 008?** Ejecuta `supabase/update_009_eventos.sql` (eventos operables: cancelar un evento avisando a los asistentes, aviso al cambiar la fecha, y topes de tamaño en las solicitudes). Aplícala antes de desplegar la sección Eventos.
