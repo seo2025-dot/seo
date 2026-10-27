@@ -16,7 +16,9 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter" });
 // Tipografía redondeada y amable, a juego con el wordmark del logotipo (solo titulares).
 const nunito = Nunito({ subsets: ["latin"], variable: "--font-nunito", weight: ["700", "800", "900"] });
 
+// Versión aparcada en ciudad.conectari.com: conectari.com pasa a ser la app de negocios. No indexar.
 export const metadata: Metadata = {
+  robots: { index: false, follow: false },
   title: { default: `conectari.com | ${LEMA}`, template: "%s | conectari.com" },
   description:
     "Inmuebles, vehículos, negocios, empleos freelance y comunidad en tu ciudad. Trato directo entre personas, con perfiles y valoraciones verificadas.",
